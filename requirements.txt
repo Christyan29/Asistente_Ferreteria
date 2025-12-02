@@ -1,0 +1,13 @@
+
+PyQt5==5.15.11
+openai==1.54.4
+SpeechRecognition==3.10.4
+pyttsx3==2.99
+PyAudio==0.2.14
+gTTS==2.5.4
+pygame==2.6.0
+pandas==2.3.2
+openpyxl==3.1.5
+python-dotenv==1.0.1
+SQLAlchemy==2.0.36
+requests==2.32.5
