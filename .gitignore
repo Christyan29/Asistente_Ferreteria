@@ -6,3 +6,7 @@ __pycache__/
 .vscode/
 .idea/
 database/ferreteria.db
+
+# Archivos de prueba
+test_import.xlsx
+inventario_ferreteria_*.xlsx
