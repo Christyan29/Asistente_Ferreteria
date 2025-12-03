@@ -14,10 +14,33 @@ class VoiceService:
     def __init__(self):
         self.recognizer = sr.Recognizer()
         self.microphone = None
+        self._initialize_microphone()
+
+    def _initialize_microphone(self):
+        """Inicializa el micrófono con mejor manejo de errores"""
         try:
+            # Listar dispositivos disponibles
+            logger.info("Buscando dispositivos de audio...")
+
+            # Intentar con el micrófono por defecto
             self.microphone = sr.Microphone()
+
+            # Probar que funciona
+            with self.microphone as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.2)
+
+            logger.info("✅ Micrófono inicializado correctamente")
+
+        except OSError as e:
+            logger.error(f"❌ Error de sistema al acceder al micrófono: {e}")
+            logger.error("Verifica que:")
+            logger.error("  1. El micrófono esté conectado")
+            logger.error("  2. Los drivers estén instalados")
+            logger.error("  3. Windows tenga permisos de micrófono para Python")
+            self.microphone = None
         except Exception as e:
-            logger.error(f"Error al inicializar micrófono: {e}")
+            logger.error(f"❌ Error inesperado al inicializar micrófono: {e}")
+            self.microphone = None
 
     def is_available(self):
         """Verifica si el servicio de voz está disponible"""

@@ -1,27 +1,27 @@
 """
-Vista del Asistente Virtual.
-Interfaz de chat para interactuar con el asistente con IA Groq.
-Integración de voz (STT y TTS).
+Vista del Asistente Virtual - VERSIÓN CORREGIDA
+Incluye integración completa de voz y avatar
 """
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
-    QLineEdit, QLabel, QTextBrowser, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextBrowser,
+    QLineEdit, QLabel, QPushButton
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread
-from PyQt5.QtGui import QTextCursor, QTextCharFormat, QColor, QFont
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QTextCursor
 from datetime import datetime
 import logging
 
 from app.presentation.components.avatar_widget import AvatarWidget
 from app.infrastructure.product_repository import ProductRepository
-from app.services.groq_service import get_groq_service
-from app.services.voice_service import get_voice_service
-from app.services.tts_service import get_tts_service
+from app.services.groq_service import GroqService
+from app.services.tts_service import TTSService
+from app.services.voice_service import VoiceService
 
 logger = logging.getLogger(__name__)
 
+
 class VoiceWorker(QThread):
-    """Hilo para escuchar voz sin bloquear la UI"""
+    """Worker para reconocimiento de voz en hilo separado"""
     texto_reconocido = pyqtSignal(str)
     error_reconocimiento = pyqtSignal(str)
     fin_escucha = pyqtSignal()
@@ -31,37 +31,45 @@ class VoiceWorker(QThread):
         self.voice_service = voice_service
 
     def run(self):
-        texto = self.voice_service.listen()
-        if texto:
-            self.texto_reconocido.emit(texto)
-        else:
-            self.error_reconocimiento.emit("No se detectó voz o no se entendió.")
-        self.fin_escucha.emit()
+        try:
+            texto = self.voice_service.listen(timeout=5, phrase_time_limit=10)
+            if texto:
+                self.texto_reconocido.emit(texto)
+            else:
+                self.error_reconocimiento.emit("No se detectó voz o no se entendió")
+        except Exception as e:
+            self.error_reconocimiento.emit(f"Error: {str(e)}")
+        finally:
+            self.fin_escucha.emit()
+
 
 class AsistenteView(QWidget):
-    """Vista del asistente virtual con chat e IA"""
+    """Vista principal del asistente con voz y avatar"""
 
-    # Señales
     mensaje_enviado = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # Servicios
         self.producto_repo = ProductRepository()
-        self.groq_service = get_groq_service()
-        self.voice_service = get_voice_service()
-        self.tts_service = get_tts_service()
-        self.conversation_history = []
+        self.groq_service = GroqService()
+        self.tts_service = TTSService()
+        self.voice_service = VoiceService()
+
+        # Estado
         self.voice_worker = None
 
         self.setup_ui()
-        self.mostrar_mensaje_bienvenida()
+        self.connect_signals()
 
-        # Conectar señales del TTS para animar avatar
-        self.tts_service.speaking_started.connect(self.avatar.start_speaking)
-        self.tts_service.speaking_finished.connect(self.avatar.stop)
+        # Mensaje de bienvenida
+        self.mostrar_bienvenida()
+
+        logger.info("AsistenteView inicializado correctamente")
 
     def setup_ui(self):
-        """Configura la interfaz de usuario"""
+        """Configura la interfaz"""
         layout = QHBoxLayout(self)
         layout.setSpacing(20)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -80,7 +88,7 @@ class AsistenteView(QWidget):
         layout = QVBoxLayout(panel)
         layout.setAlignment(Qt.AlignTop | Qt.AlignCenter)
 
-        # Título con nombre Gabo
+        # Título
         title = QLabel("Gabo")
         title.setObjectName("titleLabel")
         title.setAlignment(Qt.AlignCenter)
@@ -106,10 +114,10 @@ class AsistenteView(QWidget):
 
         # Nota sobre IA
         if self.groq_service.is_available():
-            note = QLabel("🤖 IA Activa (Groq - Ultra Rápido)")
+            note = QLabel("🤖 IA Activa (Groq)")
             note.setStyleSheet("color: #6ba56a; font-size: 9pt; padding: 8px; background-color: #f0faf0; border-radius: 8px;")
         else:
-            note = QLabel("ℹ️ Modo básico (sin IA)")
+            note = QLabel("ℹ️ Modo básico")
             note.setStyleSheet("color: #d68a6e; font-size: 9pt; padding: 8px; background-color: #fef5f1; border-radius: 8px;")
         note.setAlignment(Qt.AlignCenter)
         layout.addWidget(note)
@@ -121,22 +129,22 @@ class AsistenteView(QWidget):
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
-        # Título del chat
-        chat_title = QLabel("💬 Conversación")
-        chat_title.setObjectName("subtitleLabel")
-        layout.addWidget(chat_title)
+        # Título
+        title = QLabel("Conversación")
+        title.setObjectName("sectionTitle")
+        title.setStyleSheet("font-size: 18pt; font-weight: 600; color: #2d3748; margin-bottom: 10px;")
+        layout.addWidget(title)
 
-        # Área de mensajes
+        # Área de chat
         self.chat_display = QTextBrowser()
         self.chat_display.setObjectName("chatDisplay")
-        self.chat_display.setOpenExternalLinks(False)
         layout.addWidget(self.chat_display)
 
         # Área de entrada
         input_layout = self.create_input_area()
         layout.addLayout(input_layout)
 
-        # Sugerencias rápidas
+        # Sugerencias
         suggestions_layout = self.create_suggestions()
         layout.addLayout(suggestions_layout)
 
@@ -156,24 +164,26 @@ class AsistenteView(QWidget):
         self.btn_voz = QPushButton("🎤")
         self.btn_voz.setToolTip("Hablar con Gabo")
         self.btn_voz.setMaximumWidth(50)
+        self.btn_voz.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 25px;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
 
-        # Verificar si hay micrófono disponible
         if self.voice_service.is_available():
             self.btn_voz.clicked.connect(self.iniciar_escucha)
-            self.btn_voz.setStyleSheet("""
-                QPushButton {
-                    background-color: #f0f0f0;
-                    border: 1px solid #ccc;
-                    border-radius: 25px; /* Redondo */
-                    font-size: 16px;
-                }
-                QPushButton:hover {
-                    background-color: #e0e0e0;
-                }
-            """)
         else:
             self.btn_voz.setEnabled(False)
-            self.btn_voz.setToolTip("Micrófono no detectado")
+            self.btn_voz.setToolTip("Micrófono no disponible")
 
         layout.addWidget(self.btn_voz)
 
@@ -186,7 +196,7 @@ class AsistenteView(QWidget):
         return layout
 
     def create_suggestions(self):
-        """Crea botones de sugerencias rápidas"""
+        """Crea botones de sugerencias"""
         layout = QHBoxLayout()
 
         label = QLabel("Sugerencias:")
@@ -204,16 +214,14 @@ class AsistenteView(QWidget):
             btn = QPushButton(suggestion)
             btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #ffffff;
-                    color: #4a5568;
-                    border: 1.5px solid #e2e8f0;
+                    background-color: #f7f7f5;
+                    border: 1px solid #d4d4ce;
                     border-radius: 12px;
-                    padding: 8px 16px;
-                    font-size: 10pt;
+                    padding: 6px 12px;
+                    font-size: 9pt;
                 }
                 QPushButton:hover {
-                    background-color: #f7fafc;
-                    border-color: #cbd5e0;
+                    background-color: #e8e8e3;
                 }
             """)
             btn.clicked.connect(lambda checked, s=suggestion: self.usar_sugerencia(s))
@@ -222,26 +230,47 @@ class AsistenteView(QWidget):
         layout.addStretch()
         return layout
 
-    def mostrar_mensaje_bienvenida(self):
-        """Muestra el mensaje de bienvenida"""
+    def connect_signals(self):
+        """Conecta todas las señales"""
+        logger.info("Conectando señales TTS → Avatar...")
+
+        # CRÍTICO: Conectar señales del TTS al avatar
+        self.tts_service.speaking_started.connect(self.on_speaking_started)
+        self.tts_service.speaking_finished.connect(self.on_speaking_finished)
+
+        logger.info("✅ Señales conectadas correctamente")
+
+    def on_speaking_started(self):
+        """Callback cuando empieza a hablar"""
+        logger.info("🔊 Avatar → Speaking")
+        self.avatar.start_speaking()
+
+    def on_speaking_finished(self):
+        """Callback cuando termina de hablar"""
+        logger.info("🔇 Avatar → Idle")
+        self.avatar.stop()
+
+    def mostrar_bienvenida(self):
+        """Muestra mensaje de bienvenida"""
         mensaje = """
-        <div style='background-color: #fafaf8; padding: 20px; border-radius: 16px; margin: 10px 0; border: 1.5px solid #d4d4ce;'>
-            <p style='color: #2b2825; font-weight: 600; font-size: 13pt; margin: 0 0 12px 0;'>👋 ¡Hola! Soy Gabo, tu asistente virtual de Ferretería Disensa. Puedo ayudarte a buscar productos, consultar disponibilidad y brindarte información sobre nuestros artículos.</p>
+        <div style='text-align: center; padding: 20px;'>
+            <p style='font-size: 14pt; color: #2d3748;'>
+                👋 <b>¡Hola! Soy Gabo, tu asistente virtual de Ferretería Disensa.</b>
+            </p>
+            <p style='color: #6b6b65;'>
+                Puedo ayudarte a buscar productos, consultar disponibilidad y brindarte información sobre nuestros artículos.
+            </p>
         </div>
         """
         self.chat_display.append(mensaje)
-        # Opcional: Hablar bienvenida
-        # self.tts_service.speak("Hola, soy Gabo. ¿En qué puedo ayudarte?")
 
     def agregar_mensaje_usuario(self, texto):
-        """Agrega un mensaje del usuario al chat"""
+        """Agrega mensaje del usuario"""
         timestamp = datetime.now().strftime("%H:%M")
-        # Usar tabla anidada para efecto de burbuja que se ajusta al texto
         html = f"""
         <table width="100%" border="0" cellpadding="0" cellspacing="0">
             <tr>
                 <td align="right">
-                    <!-- Tabla interna para la burbuja -->
                     <table border="0" cellpadding="12" cellspacing="0" bgcolor="#cc785c" style="border-radius: 15px; margin: 5px;">
                         <tr>
                             <td>
@@ -259,13 +288,12 @@ class AsistenteView(QWidget):
         self.chat_display.moveCursor(QTextCursor.End)
 
     def agregar_mensaje_asistente(self, texto):
-        """Agrega un mensaje del asistente al chat"""
+        """Agrega mensaje del asistente"""
         timestamp = datetime.now().strftime("%H:%M")
         html = f"""
         <table width="100%" border="0" cellpadding="0" cellspacing="0">
             <tr>
                 <td align="left">
-                    <!-- Tabla interna para la burbuja -->
                     <table border="0" cellpadding="12" cellspacing="0" bgcolor="#fafaf8" style="border-radius: 15px; border: 1px solid #d4d4ce; margin: 5px;">
                         <tr>
                             <td>
@@ -283,15 +311,17 @@ class AsistenteView(QWidget):
         self.chat_display.moveCursor(QTextCursor.End)
 
     def usar_sugerencia(self, sugerencia):
-        """Usa una sugerencia rápida"""
+        """Usa una sugerencia"""
         self.message_input.setText(sugerencia)
         self.enviar_mensaje()
 
     def enviar_mensaje(self):
-        """Envía un mensaje y procesa la respuesta"""
+        """Envía un mensaje"""
         mensaje = self.message_input.text().strip()
         if not mensaje:
             return
+
+        logger.info(f"📤 Enviando mensaje: {mensaje}")
 
         # Limpiar input
         self.message_input.clear()
@@ -299,29 +329,93 @@ class AsistenteView(QWidget):
         # Mostrar mensaje del usuario
         self.agregar_mensaje_usuario(mensaje)
 
-        # Cambiar estado del avatar
+        # Cambiar avatar a "thinking"
+        logger.info("🤔 Avatar → Thinking")
         self.avatar.start_thinking()
 
-        # Procesar mensaje y generar respuesta
+        # Procesar y obtener respuesta
         respuesta = self.procesar_mensaje(mensaje)
 
         # Mostrar respuesta
         self.agregar_mensaje_asistente(respuesta)
 
         # Hablar respuesta
+        logger.info(f"🗣️ Llamando a TTS.speak()")
         self.tts_service.speak(respuesta)
-
-        # Volver a estado idle (se maneja por señales del TTS ahora)
-        if not self.tts_service.engine: # Si no hay TTS, detener manual
-            self.avatar.stop()
 
         # Emitir señal
         self.mensaje_enviado.emit(mensaje)
 
+    def procesar_mensaje(self, mensaje):
+        """Procesa el mensaje y genera respuesta"""
+        try:
+            if self.groq_service.is_available():
+                return self.procesar_con_groq(mensaje)
+            else:
+                return self.procesar_modo_basico(mensaje)
+        except Exception as e:
+            logger.error(f"Error al procesar mensaje: {e}")
+            return "Lo siento, ocurrió un error al procesar tu mensaje."
+
+    def procesar_con_groq(self, mensaje):
+        """Procesa con IA de Groq"""
+        try:
+            respuesta = self.groq_service.chat_with_context(mensaje)
+            return respuesta
+        except Exception as e:
+            logger.error(f"Error con Groq: {e}")
+            return self.procesar_modo_basico(mensaje)
+
+    def procesar_modo_basico(self, mensaje):
+        """Modo básico sin IA"""
+        mensaje_lower = mensaje.lower()
+
+        try:
+            if "stock bajo" in mensaje_lower:
+                productos = self.producto_repo.get_stock_bajo()
+                if not productos:
+                    return "✅ No hay productos con stock bajo."
+
+                respuesta = f"⚠️ Hay {len(productos)} productos con stock bajo:<br><br>"
+                for p in productos[:5]:
+                    respuesta += f"• <b>{p.nombre}</b>: {p.stock} {p.unidad_medida}<br>"
+                return respuesta
+
+            elif "categoría" in mensaje_lower or "categorias" in mensaje_lower:
+                from app.infrastructure.product_repository import CategoriaRepository
+                cat_repo = CategoriaRepository()
+                categorias = cat_repo.get_all()
+
+                respuesta = f"📁 Tenemos {len(categorias)} categorías:<br><br>"
+                for cat in categorias:
+                    respuesta += f"• {cat.nombre}<br>"
+                return respuesta
+
+            elif any(palabra in mensaje_lower for palabra in ["qué productos", "productos tienes", "total"]):
+                productos = self.producto_repo.get_all()
+                return f"📦 Tenemos {len(productos)} productos en total en nuestro inventario."
+
+            else:
+                # Búsqueda general
+                productos = self.producto_repo.search(mensaje)
+                if not productos:
+                    return f"Lo siento, no encontré productos relacionados con '{mensaje}'."
+
+                respuesta = f"Encontré {len(productos)} producto(s):<br><br>"
+                for p in productos[:5]:
+                    respuesta += f"• <b>{p.nombre}</b> - ${p.precio}<br>"
+                return respuesta
+
+        except Exception as e:
+            logger.error(f"Error en modo básico: {e}")
+            return "Lo siento, ocurrió un error al buscar."
+
     def iniciar_escucha(self):
-        """Inicia el proceso de escucha de voz"""
+        """Inicia escucha de voz"""
+        logger.info("🎤 Iniciando escucha de voz...")
+
         self.btn_voz.setEnabled(False)
-        self.btn_voz.setStyleSheet("background-color: #ffcccc; border-radius: 25px;") # Rojo claro
+        self.btn_voz.setStyleSheet("background-color: #ffcccc; border-radius: 25px;")
         self.info_label.setText("Escuchando... 👂")
         self.avatar.start_listening()
 
@@ -332,19 +426,18 @@ class AsistenteView(QWidget):
         self.voice_worker.start()
 
     def procesar_voz(self, texto):
-        """Procesa el texto reconocido por voz"""
+        """Procesa texto reconocido"""
+        logger.info(f"✅ Voz reconocida: {texto}")
         self.message_input.setText(texto)
         self.enviar_mensaje()
 
     def error_voz(self, error):
-        """Maneja errores de voz"""
+        """Maneja error de voz"""
+        logger.warning(f"⚠️ Error de voz: {error}")
         self.info_label.setText(error)
-        # Restaurar mensaje después de 2 segundos
-        QThread.msleep(2000) # Esto bloquearía UI, mejor no usarlo aquí directo, pero es breve
-        # Mejor dejar el mensaje de error visible un momento
 
     def fin_escucha(self):
-        """Finaliza el proceso de escucha"""
+        """Finaliza escucha"""
         self.btn_voz.setEnabled(True)
         self.btn_voz.setStyleSheet("""
             QPushButton {
@@ -360,149 +453,8 @@ class AsistenteView(QWidget):
         self.info_label.setText("¿En qué puedo ayudarte hoy?")
         self.avatar.stop()
 
-    def procesar_mensaje(self, mensaje):
-        """
-        Procesa el mensaje del usuario y genera una respuesta.
-        Usa Groq AI si está disponible, sino usa modo básico.
-        """
-        try:
-            # Intentar usar Groq AI primero
-            if self.groq_service.is_available():
-                return self.procesar_con_groq(mensaje)
-            else:
-                # Fallback a modo básico
-                return self.procesar_modo_basico(mensaje)
-        except Exception as e:
-            logger.error(f"Error al procesar mensaje: {e}")
-            # Si falla Groq, intentar modo básico
-            try:
-                return self.procesar_modo_basico(mensaje)
-            except:
-                return "Lo siento, ocurrió un error al procesar tu consulta. Por favor, intenta de nuevo."
-
-    def procesar_con_groq(self, mensaje):
-        """
-        Procesa el mensaje usando Groq AI.
-        """
-        try:
-            # Obtener contexto del inventario
-            productos = self.producto_repo.get_all()
-            productos_nombres = [p.nombre for p in productos[:20]]  # Primeros 20
-            contexto = f"Productos disponibles: {', '.join(productos_nombres)}"
-
-            # Obtener respuesta de Groq
-            respuesta = self.groq_service.chat_with_context(mensaje, contexto)
-            return respuesta
-
-        except Exception as e:
-            logger.error(f"Error con Groq: {e}")
-            raise
-
-    def procesar_modo_basico(self, mensaje):
-        """
-        Procesa el mensaje del usuario en modo básico (sin IA).
-        Esta es una versión simple que busca en la base de datos.
-        """
-        mensaje_lower = mensaje.lower()
-
-        try:
-            # Comandos específicos con más variaciones
-            if any(palabra in mensaje_lower for palabra in ["stock bajo", "stock mínimo", "poco stock", "productos bajos"]):
-                return self.responder_stock_bajo()
-
-            elif any(palabra in mensaje_lower for palabra in ["categoría", "categorias", "tipos de productos", "secciones"]):
-                return self.responder_categorias()
-
-            elif any(palabra in mensaje_lower for palabra in ["cuántos productos", "total", "cantidad", "qué productos tienes", "que productos", "productos disponibles"]):
-                return self.responder_total_productos()
-
-            elif any(palabra in mensaje_lower for palabra in ["buscar", "busca", "necesito", "quiero", "tienes", "tienen", "hay"]):
-                # Extraer término de búsqueda - remover palabras comunes
-                palabras_ignorar = ["buscar", "busca", "necesito", "quiero", "tienes", "tienen", "hay", "un", "una", "el", "la", "los", "las", "de", "para"]
-                palabras = mensaje_lower.split()
-                terminos = [p for p in palabras if p not in palabras_ignorar and len(p) > 2]
-
-                if terminos:
-                    termino = " ".join(terminos)
-                    return self.responder_busqueda(termino)
-                else:
-                    # Si no hay términos específicos, mostrar productos
-                    return self.responder_total_productos()
-
-            # Búsqueda general por palabras clave
-            else:
-                return self.responder_busqueda(mensaje)
-
-        except Exception as e:
-            logger.error(f"Error al procesar mensaje en modo básico: {e}")
-            return "Lo siento, ocurrió un error al procesar tu consulta. Por favor, intenta de nuevo."
-
-    def responder_stock_bajo(self):
-        """Responde con productos de stock bajo"""
-        productos = self.producto_repo.get_stock_bajo()
-
-        if not productos:
-            return "✅ ¡Excelente! No hay productos con stock bajo en este momento."
-
-        respuesta = f"⚠️ Encontré {len(productos)} producto(s) con stock bajo:<br><br>"
-        for p in productos[:5]:  # Máximo 5
-            respuesta += f"• <b>{p.nombre}</b>: {p.stock} {p.unidad_medida} (mínimo: {p.stock_minimo})<br>"
-
-        if len(productos) > 5:
-            respuesta += f"<br>... y {len(productos) - 5} más."
-
-        return respuesta
-
-    def responder_categorias(self):
-        """Responde con las categorías disponibles"""
-        from app.infrastructure.product_repository import CategoriaRepository
-        cat_repo = CategoriaRepository()
-        categorias = cat_repo.get_all()
-
-        if not categorias:
-            return "No hay categorías registradas en el sistema."
-
-        respuesta = f"📁 Tenemos {len(categorias)} categorías disponibles:<br><br>"
-        for cat in categorias:
-            respuesta += f"• <b>{cat.nombre}</b>"
-            if cat.descripcion:
-                respuesta += f": {cat.descripcion}"
-            respuesta += "<br>"
-
-        return respuesta
-
-    def responder_total_productos(self):
-        """Responde con el total de productos"""
-        productos = self.producto_repo.get_all()
-        return f"📦 Actualmente tenemos <b>{len(productos)} productos</b> registrados en el inventario."
-
-    def responder_busqueda(self, termino):
-        """Responde con resultados de búsqueda"""
-        productos = self.producto_repo.search(termino)
-
-        if not productos:
-            return f"❌ No encontré productos que coincidan con '<b>{termino}</b>'. Intenta con otro término de búsqueda."
-
-        respuesta = f"🔍 Encontré {len(productos)} producto(s) relacionado(s) con '<b>{termino}</b>':<br><br>"
-
-        for p in productos[:5]:  # Máximo 5 resultados
-            respuesta += f"• <b>{p.nombre}</b><br>"
-            if p.marca:
-                respuesta += f"  Marca: {p.marca}<br>"
-            respuesta += f"  Precio: {p.precio_formateado} | Stock: {p.stock} {p.unidad_medida}"
-            if p.stock_bajo:
-                respuesta += " ⚠️"
-            respuesta += "<br><br>"
-
-        if len(productos) > 5:
-            respuesta += f"... y {len(productos) - 5} producto(s) más."
-
-        return respuesta
-
-    def limpiar_chat(self):
-        """Limpia el historial del chat"""
+    def limpiar_historial(self):
+        """Limpia el historial de chat"""
         self.chat_display.clear()
-        self.conversation_history.clear()
-        if self.groq_service.is_available():
-            self.groq_service.clear_history()
-        self.mostrar_mensaje_bienvenida()
+        self.groq_service.clear_history()
+        self.mostrar_bienvenida()
