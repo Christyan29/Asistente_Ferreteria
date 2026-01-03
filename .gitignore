@@ -1,12 +1,38 @@
+# Python
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Entorno
 .env
-.DS_Store
+.venv
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Base de datos
 database/ferreteria.db
+*.db
 
 # Archivos de prueba
 test_import.xlsx
 inventario_ferreteria_*.xlsx
+
+# Logs
+logs/
+*.log
+
+# Sistema
+.DS_Store
+Thumbs.db

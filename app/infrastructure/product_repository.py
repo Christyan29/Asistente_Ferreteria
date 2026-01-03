@@ -204,10 +204,40 @@ class ProductRepository:
         """
         session = self._get_session()
         try:
-            query = session.query(ProductoModel).filter(ProductoModel.categoria_id == categoria_id)
+            query = session.query(ProductoModel).filter(
+                ProductoModel.categoria_id == categoria_id
+            )
+
             if solo_activos:
                 query = query.filter(ProductoModel.activo == True)
+
             models = query.all()
+            return [self._model_to_entity(m) for m in models]
+        finally:
+            if self._owns_session:
+                session.close()
+
+    def get_low_stock(self, solo_activos: bool = True) -> List[Producto]:
+        """
+        Obtiene productos con stock bajo (stock <= stock_minimo).
+
+        Args:
+            solo_activos: Si True, solo retorna productos activos
+
+        Returns:
+            Lista de productos con stock bajo
+        """
+        session = self._get_session()
+        try:
+            query = session.query(ProductoModel).filter(
+                ProductoModel.stock <= ProductoModel.stock_minimo
+            )
+
+            if solo_activos:
+                query = query.filter(ProductoModel.activo == True)
+
+            models = query.order_by(ProductoModel.stock.asc()).all()
+            logger.info(f"Productos con stock bajo: {len(models)}")
             return [self._model_to_entity(m) for m in models]
         finally:
             if self._owns_session:

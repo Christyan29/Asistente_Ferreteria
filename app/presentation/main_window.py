@@ -1,6 +1,6 @@
 """
-Ventana principal de la aplicación - Diseño moderno pastel minimalista.
-Inspirado en interfaces modernas de chat IA con autenticación para inventario.
+Ventana principal de la aplicación.
+Gestión de inventario con asistente virtual.
 """
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -13,6 +13,7 @@ import logging
 
 from app.presentation.inventario_view import InventarioView
 from app.presentation.asistente_view import AsistenteView
+from app.presentation.pedidos_view import PedidosView
 from app.presentation.login_dialog import LoginDialog
 from app.presentation.styles import get_stylesheet
 from app.config.settings import AppConfig
@@ -31,10 +32,10 @@ class MainWindow(QMainWindow):
         self.setup_menu()
         self.setup_statusbar()
 
-        # Aplicar estilos Claude
-        self.setStyleSheet(get_stylesheet("claude"))
+        # Aplicar estilos
+        self.setStyleSheet(get_stylesheet())
 
-        logger.info("Ventana principal inicializada con tema pastel")
+        logger.info("Ventana principal inicializada")
 
     def setup_window(self):
         """Configura las propiedades de la ventana"""
@@ -58,7 +59,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Header moderno
+        # Header
         header = self.create_header()
         main_layout.addWidget(header)
 
@@ -67,7 +68,7 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # Stack de vistas (sin panel lateral, estilo moderno)
+        # Stack de vistas
         self.stacked_widget = QStackedWidget()
         content_layout.addWidget(self.stacked_widget, stretch=1)
 
@@ -77,7 +78,7 @@ class MainWindow(QMainWindow):
         self.create_views()
 
     def create_header(self):
-        """Crea el header moderno estilo ChatGPT"""
+        """Crea el header de la aplicación"""
         header = QWidget()
         header.setObjectName("sidePanel")
         header.setStyleSheet("""
@@ -124,23 +125,28 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Botones de navegación modernos
+        # Botones de navegación
         self.nav_buttons = []
 
         # Botón Asistente
-        btn_asistente = self.create_modern_nav_button("💬 Chat", 0, True)
+        btn_asistente = self.create_modern_nav_button("Chat", 0, True)
         layout.addWidget(btn_asistente)
         self.nav_buttons.append(btn_asistente)
 
         # Botón Inventario (con icono de candado)
-        btn_inventario = self.create_modern_nav_button("🔐 Inventario", 1, False)
+        btn_inventario = self.create_modern_nav_button("Inventario", 1, False)
         layout.addWidget(btn_inventario)
         self.nav_buttons.append(btn_inventario)
+
+        # Botón Pedidos
+        btn_pedidos = self.create_modern_nav_button("Pedidos", 2, False)
+        layout.addWidget(btn_pedidos)
+        self.nav_buttons.append(btn_pedidos)
 
         return header
 
     def create_modern_nav_button(self, text, index, is_default=False):
-        """Crea un botón de navegación moderno"""
+        """Crea un botón de navegación"""
         btn = QPushButton(text)
         btn.setCheckable(True)
         btn.setChecked(is_default)
@@ -178,13 +184,17 @@ class MainWindow(QMainWindow):
         self.inventario_view = InventarioView()
         self.stacked_widget.addWidget(self.inventario_view)
 
+        # Vista de Pedidos (requiere autenticación)
+        self.pedidos_view = PedidosView()
+        self.stacked_widget.addWidget(self.pedidos_view)
+
         # Mostrar vista del asistente por defecto
         self.cambiar_vista(0)
 
     def cambiar_vista(self, index):
-        """Cambia la vista actual con autenticación para inventario"""
-        # Si intenta acceder al inventario (index 1), verificar autenticación
-        if index == 1:
+        """Cambia la vista actual con autenticación para inventario y pedidos"""
+        # Si intenta acceder al inventario (index 1) o pedidos (index 2), verificar autenticación
+        if index in [1, 2]:
             if not self.authenticated_user:
                 # Mostrar diálogo de login
                 login_dialog = LoginDialog(self)
@@ -192,7 +202,7 @@ class MainWindow(QMainWindow):
                     if login_dialog.is_authenticated():
                         self.authenticated_user = login_dialog.get_username()
                         logger.info(f"Usuario autenticado: {self.authenticated_user}")
-                        self.mostrar_vista_inventario(index)
+                        self.mostrar_vista_protegida(index)
                     else:
                         # Volver a la vista del asistente
                         self.cambiar_vista(0)
@@ -202,18 +212,22 @@ class MainWindow(QMainWindow):
                     self.cambiar_vista(0)
                     return
             else:
-                self.mostrar_vista_inventario(index)
+                self.mostrar_vista_protegida(index)
         else:
             # Vista del asistente, siempre accesible
             self.stacked_widget.setCurrentIndex(index)
             self.actualizar_botones_navegacion(index)
             self.statusBar().showMessage("Vista: Chat con Gabo")
 
-    def mostrar_vista_inventario(self, index):
-        """Muestra la vista de inventario después de autenticación"""
+    def mostrar_vista_protegida(self, index):
+        """Muestra vista protegida (Inventario o Pedidos) después de autenticación"""
         self.stacked_widget.setCurrentIndex(index)
         self.actualizar_botones_navegacion(index)
-        self.statusBar().showMessage(f"Vista: Gestión de Inventario | Usuario: {self.authenticated_user}")
+
+        if index == 1:
+            self.statusBar().showMessage(f"Vista: Gestión de Inventario | Usuario: {self.authenticated_user}")
+        elif index == 2:
+            self.statusBar().showMessage(f"Vista: Pedidos | Usuario: {self.authenticated_user}")
 
     def actualizar_botones_navegacion(self, index):
         """Actualiza el estado de los botones de navegación"""
@@ -242,18 +256,18 @@ class MainWindow(QMainWindow):
         # Menú Archivo
         menu_archivo = menubar.addMenu("&Archivo")
 
-        action_refrescar = QAction("🔄 Refrescar", self)
+        action_refrescar = QAction("Refrescar", self)
         action_refrescar.setShortcut("F5")
         action_refrescar.triggered.connect(self.refrescar_datos)
         menu_archivo.addAction(action_refrescar)
 
-        action_cerrar_sesion = QAction("🚪 Cerrar Sesión Inventario", self)
+        action_cerrar_sesion = QAction("Cerrar Sesión Inventario", self)
         action_cerrar_sesion.triggered.connect(self.cerrar_sesion)
         menu_archivo.addAction(action_cerrar_sesion)
 
         menu_archivo.addSeparator()
 
-        action_salir = QAction("❌ Salir", self)
+        action_salir = QAction("Salir", self)
         action_salir.setShortcut("Ctrl+Q")
         action_salir.triggered.connect(self.close)
         menu_archivo.addAction(action_salir)
@@ -261,12 +275,12 @@ class MainWindow(QMainWindow):
         # Menú Ver
         menu_ver = menubar.addMenu("&Ver")
 
-        action_asistente = QAction("💬 Chat con Gabo", self)
+        action_asistente = QAction("Chat con Gabo", self)
         action_asistente.setShortcut("Ctrl+1")
         action_asistente.triggered.connect(lambda: self.cambiar_vista(0))
         menu_ver.addAction(action_asistente)
 
-        action_inventario = QAction("🔐 Inventario", self)
+        action_inventario = QAction("Inventario", self)
         action_inventario.setShortcut("Ctrl+2")
         action_inventario.triggered.connect(lambda: self.cambiar_vista(1))
         menu_ver.addAction(action_inventario)
@@ -274,7 +288,7 @@ class MainWindow(QMainWindow):
         # Menú Ayuda
         menu_ayuda = menubar.addMenu("&Ayuda")
 
-        action_acerca = QAction("ℹ️ Acerca de", self)
+        action_acerca = QAction("Acerca de", self)
         action_acerca.triggered.connect(self.mostrar_acerca_de)
         menu_ayuda.addAction(action_acerca)
 
@@ -298,7 +312,7 @@ class MainWindow(QMainWindow):
 
         if index == 1:  # Vista de inventario
             self.inventario_view.cargar_datos()
-            self.statusBar().showMessage("✓ Datos actualizados", 3000)
+            self.statusBar().showMessage(" Datos actualizados", 3000)
         else:
             self.statusBar().showMessage("Vista actualizada", 3000)
 
@@ -332,16 +346,16 @@ class MainWindow(QMainWindow):
             <div style='text-align: left; padding: 0 20px;'>
                 <p style='color: #2d3748;'><b>Características:</b></p>
                 <ul style='color: #4a5568;'>
-                    <li>💬 Chat con Gabo, tu asistente virtual</li>
-                    <li>📦 Gestión completa de inventario (requiere autenticación)</li>
-                    <li>⚠️ Alertas de stock bajo</li>
-                    <li>🎨 Interfaz moderna y minimalista</li>
+                    <li>Chat con Gabo, tu asistente virtual</li>
+                    <li> Gestión completa de inventario (requiere autenticación)</li>
+                    <li> Alertas de stock bajo</li>
+                    <li> Interfaz intuitiva</li>
                 </ul>
             </div>
             <br>
-            <p style='color: #7eb8f5;'><b>Estado:</b> Versión funcional con tema pastel</p>
+            <p style='color: #7eb8f5;'><b>Estado:</b> Versión funcional</p>
             <p style='color: #dd6b20; font-size: 9pt;'>
-                ⚠️ Funcionalidades de IA y voz pendientes de configuración
+                 Funcionalidades de IA y voz pendientes de configuración
             </p>
         </div>
         """

@@ -1,9 +1,9 @@
 """
-Estilos QSS (Qt Style Sheets) - Tema Claude AI.
-Colores inspirados en Claude AI: crema, beige, naranja.
+Estilos QSS (Qt Style Sheets) para la aplicación.
+Paleta de colores: crema, beige, naranja.
 """
 
-# Tema Claude AI - Colores crema y naranja
+# Colores principales
 CLAUDE_THEME = """
 /* ===== ESTILOS GLOBALES ===== */
 QWidget {
@@ -43,7 +43,7 @@ QPushButton:disabled {
     border-color: #e4e4de;
 }
 
-/* Botones Primarios - Naranja Claude */
+/* Botones Primarios */
 QPushButton#primaryButton {
     background-color: #cc785c;
     color: #ffffff;
@@ -393,12 +393,12 @@ QToolTip {
 """
 
 
-def get_stylesheet(theme="claude"):
+def get_stylesheet(theme="default"):
     """
     Obtiene la hoja de estilos según el tema solicitado.
 
     Args:
-        theme: "claude" (por defecto)
+        theme: "default" (por defecto)
 
     Returns:
         String con los estilos QSS

@@ -5,7 +5,8 @@ Permite ver, agregar, editar y eliminar productos.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QLineEdit, QLabel, QComboBox, QMessageBox,
-    QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QTextEdit, QGroupBox
+    QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QTextEdit, QGroupBox,
+    QFileDialog, QProgressDialog, QMenu, QAction, QHeaderView
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
@@ -15,6 +16,7 @@ import logging
 from app.infrastructure.product_repository import ProductRepository, CategoriaRepository
 from app.domain.producto import Producto
 from app.domain.categoria import Categoria
+from app.services.excel_importer import ExcelImporter
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ class InventarioView(QWidget):
         self.producto_repo = ProductRepository()
         self.categoria_repo = CategoriaRepository()
         self.productos = []
+        self.productos_actuales = []  # Para manejar filtros correctamente
         self.categorias = []
         self.setup_ui()
         self.cargar_datos()
@@ -78,10 +81,10 @@ class InventarioView(QWidget):
         self.categoria_filter.currentIndexChanged.connect(self.filtrar_por_categoria)
         layout.addWidget(self.categoria_filter, stretch=1)
 
-        # Filtro de stock bajo
-        self.stock_bajo_btn = QPushButton("⚠️ Stock Bajo")
-        self.stock_bajo_btn.setCheckable(True)
-        self.stock_bajo_btn.clicked.connect(self.filtrar_stock_bajo)
+        # Filtro de stock bajo (Menú)
+        self.stock_bajo_btn = QPushButton("Stock Bajo")
+        self.stock_bajo_btn.setObjectName("stockBajoButton")
+        self.setup_stock_bajo_menu()
         layout.addWidget(self.stock_bajo_btn)
 
         return layout
@@ -91,29 +94,45 @@ class InventarioView(QWidget):
         layout = QHBoxLayout()
 
         # Botón agregar
-        self.btn_agregar = QPushButton("➕ Agregar Producto")
+        self.btn_agregar = QPushButton("Agregar Producto")
         self.btn_agregar.setObjectName("successButton")
         self.btn_agregar.clicked.connect(self.agregar_producto)
         layout.addWidget(self.btn_agregar)
 
         # Botón editar
-        self.btn_editar = QPushButton("✏️ Editar")
+        self.btn_editar = QPushButton("Editar")
         self.btn_editar.setObjectName("primaryButton")
         self.btn_editar.clicked.connect(self.editar_producto)
         self.btn_editar.setEnabled(False)
         layout.addWidget(self.btn_editar)
 
         # Botón eliminar
-        self.btn_eliminar = QPushButton("🗑️ Eliminar")
+        self.btn_eliminar = QPushButton("Eliminar")
         self.btn_eliminar.setObjectName("dangerButton")
         self.btn_eliminar.clicked.connect(self.eliminar_producto)
         self.btn_eliminar.setEnabled(False)
         layout.addWidget(self.btn_eliminar)
 
+        # Separador
         layout.addStretch()
 
+        # Botón importar Excel
+        self.btn_importar = QPushButton("Importar Excel")
+        self.btn_importar.clicked.connect(self.importar_excel)
+        self.btn_importar.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                color: #333;
+                border: 1px solid #ccc;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        layout.addWidget(self.btn_importar)
+
         # Botón refrescar
-        self.btn_refrescar = QPushButton("🔄 Refrescar")
+        self.btn_refrescar = QPushButton("Refrescar")
         self.btn_refrescar.clicked.connect(self.cargar_datos)
         layout.addWidget(self.btn_refrescar)
 
@@ -133,8 +152,15 @@ class InventarioView(QWidget):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setSelectionMode(QTableWidget.SingleSelection)
         table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(True)
         table.verticalHeader().setVisible(False)
+
+        # Ajuste de columnas
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Nombre ajustable
+        table.setColumnWidth(1, 280) # Ancho inicial razonable
+        header.setSectionResizeMode(7, QHeaderView.Stretch)      # Marca se estira
+        header.setStretchLastSection(False)
 
         # Conectar señal de selección
         table.itemSelectionChanged.connect(self.on_selection_changed)
@@ -153,7 +179,7 @@ class InventarioView(QWidget):
             self.productos = self.producto_repo.get_all()
             self.actualizar_tabla()
 
-            self.status_label.setText(f"✓ {len(self.productos)} productos cargados")
+            self.status_label.setText(f" {len(self.productos)} productos cargados")
         except Exception as e:
             logger.error(f"Error al cargar datos: {e}")
             QMessageBox.critical(self, "Error", f"Error al cargar datos:\n{str(e)}")
@@ -170,6 +196,7 @@ class InventarioView(QWidget):
         if productos is None:
             productos = self.productos
 
+        self.productos_actuales = productos
         self.table.setRowCount(len(productos))
 
         for row, producto in enumerate(productos):
@@ -207,8 +234,8 @@ class InventarioView(QWidget):
             # Marca
             self.table.setItem(row, 7, QTableWidgetItem(producto.marca or ""))
 
-        # Ajustar columnas
-        self.table.resizeColumnsToContents()
+        # En la header de la tabla ya se configuró el auto-ajuste
+        # self.table.resizeColumnsToContents() # Eliminado para evitar smashed columns iniciales
 
     def buscar_productos(self, texto):
         """Busca productos por texto"""
@@ -241,19 +268,132 @@ class InventarioView(QWidget):
         """Filtra productos con stock bajo"""
         if checked:
             try:
-                productos = self.producto_repo.get_stock_bajo()
+                productos = self.producto_repo.get_low_stock() # Usamos el método correcto del repo
                 self.actualizar_tabla(productos)
-                self.status_label.setText(f"⚠️ {len(productos)} producto(s) con stock bajo")
+                self.status_label.setText(f" ⚠️ {len(productos)} producto(s) con stock bajo")
             except Exception as e:
                 logger.error(f"Error al filtrar stock bajo: {e}")
         else:
             self.actualizar_tabla()
 
+    def setup_stock_bajo_menu(self):
+        """Configura el menú desplegable del botón Stock Bajo"""
+        menu = QMenu(self)
+
+        # Acción: Ver productos en stock bajo (filtro)
+        self.action_ver_stock_bajo = QAction("Ver Productos con Stock Bajo", self)
+        self.action_ver_stock_bajo.setCheckable(True)
+        self.action_ver_stock_bajo.triggered.connect(lambda: self.filtrar_stock_bajo(self.action_ver_stock_bajo.isChecked()))
+        menu.addAction(self.action_ver_stock_bajo)
+
+        menu.addSeparator()
+
+        # Acción: Configurar stock mínimo global
+        action_global = QAction("Configurar Stock Mínimo (Todos...)", self)
+        action_global.triggered.connect(self.configurar_stock_global)
+        menu.addAction(action_global)
+
+        # Acción: Configurar stock mínimo para producto seleccionado
+        self.action_individual = QAction("Configurar Stock Mínimo (Seleccionado...)", self)
+        self.action_individual.triggered.connect(self.configurar_stock_especifico)
+        self.action_individual.setEnabled(False)
+        menu.addAction(self.action_individual)
+
+        self.stock_bajo_btn.setMenu(menu)
+
+    def configurar_stock_global(self):
+        """Abre un diálogo para configurar el stock mínimo de todos los productos"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configurar Stock Mínimo Global")
+        layout = QVBoxLayout(dialog)
+
+        label = QLabel("Establecer el mismo stock mínimo para\nTODOS los productos del inventario:")
+        label.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(label)
+
+        spin = QSpinBox()
+        spin.setRange(0, 9999)
+        spin.setValue(10)
+        spin.setFixedWidth(100)
+        layout.addWidget(spin, alignment=Qt.AlignCenter)
+
+        layout.addSpacing(20)
+
+        buttons = QHBoxLayout()
+        btn_ok = QPushButton("Aplicar a Todos")
+        btn_ok.setObjectName("successButton")
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.clicked.connect(dialog.reject)
+        buttons.addWidget(btn_ok)
+        buttons.addWidget(btn_cancel)
+        layout.addLayout(buttons)
+
+        if dialog.exec_() == QDialog.Accepted:
+            nuevo_minimo = spin.value()
+            try:
+                # Iterar y actualizar todos los productos
+                for p in self.productos:
+                    p.stock_minimo = nuevo_minimo
+                    self.producto_repo.update(p)
+                self.cargar_datos()
+                QMessageBox.information(self, "Éxito", f"Se actualizó el stock mínimo a {nuevo_minimo} para todos los productos.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"No se pudo actualizar el stock global:\n{str(e)}")
+
+    def configurar_stock_especifico(self):
+        """Abre un diálogo rápido para el producto seleccionado"""
+        producto = self.get_selected_producto()
+        if not producto:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Stock Mínimo: {producto.nombre}")
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel(f"<b>Producto:</b> {producto.nombre}"))
+        layout.addWidget(QLabel(f"<b>Stock Actual:</b> {producto.stock}"))
+
+        layout.addSpacing(10)
+
+        form_layout = QFormLayout()
+        spin = QSpinBox()
+        spin.setRange(0, 9999)
+        spin.setValue(producto.stock_minimo)
+        form_layout.addRow("Stock Mínimo:", spin)
+        layout.addLayout(form_layout)
+
+        layout.addSpacing(15)
+
+        buttons = QHBoxLayout()
+        btn_ok = QPushButton("Guardar")
+        btn_ok.setObjectName("successButton")
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.clicked.connect(dialog.reject)
+        buttons.addWidget(btn_ok)
+        buttons.addWidget(btn_cancel)
+        layout.addLayout(buttons)
+
+        if dialog.exec_() == QDialog.Accepted:
+            producto.stock_minimo = spin.value()
+            try:
+                self.producto_repo.update(producto)
+                self.cargar_datos()
+                QMessageBox.information(self, "Éxito", "Configuración guardada.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error al guardar:\n{str(e)}")
+
     def on_selection_changed(self):
         """Maneja el cambio de selección en la tabla"""
-        has_selection = len(self.table.selectedItems()) > 0
+        selected_rows = self.table.selectionModel().selectedRows()
+        has_selection = len(selected_rows) > 0
         self.btn_editar.setEnabled(has_selection)
         self.btn_eliminar.setEnabled(has_selection)
+
+        # Habilitar acción individual en el menú de stock bajo si hay una instancia de la acción
+        if hasattr(self, 'action_individual'):
+            self.action_individual.setEnabled(has_selection)
 
     def get_selected_producto(self):
         """Obtiene el producto seleccionado"""
@@ -262,8 +402,8 @@ class InventarioView(QWidget):
             return None
 
         row = selected_rows[0].row()
-        if row < len(self.productos):
-            return self.productos[row]
+        if row < len(self.productos_actuales):
+            return self.productos_actuales[row]
         return None
 
     def agregar_producto(self):
@@ -318,6 +458,44 @@ class InventarioView(QWidget):
             except Exception as e:
                 logger.error(f"Error al eliminar producto: {e}")
                 QMessageBox.critical(self, "Error", f"Error al eliminar producto:\n{str(e)}")
+
+    def importar_excel(self):
+        """Importa productos desde un archivo Excel"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar archivo Excel", "", "Archivos Excel (*.xlsx);;Todos los archivos (*.*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            importer = ExcelImporter()
+
+            # Mostrar progreso indeterminado
+            progress = QProgressDialog("Importando productos...", "Cancelar", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+
+            # Ejecutar importación
+            stats = importer.import_products(file_path)
+            progress.cancel()
+
+            mensaje = (
+                f"Importación completada.\n\n"
+                f"Total procesado: {stats['total']}\n"
+                f"✅ Éxitos: {stats['success']} (Creados: {stats['created']}, Actualizados: {stats['updated']})\n"
+                f"❌ Errores: {len(stats['errors'])}"
+            )
+
+            if stats['errors']:
+                mensaje += "\n\nPrimeros errores:\n" + "\n".join(stats['errors'][:5])
+
+            QMessageBox.information(self, "Resultado Importación", mensaje)
+            self.cargar_datos()
+
+        except Exception as e:
+            logger.error(f"Error en importación: {e}")
+            QMessageBox.critical(self, "Error", f"Error al importar archivo:\n{str(e)}")
 
 
 class ProductoDialog(QDialog):
@@ -381,7 +559,19 @@ class ProductoDialog(QDialog):
         # Stock mínimo
         self.stock_min_input = QSpinBox()
         self.stock_min_input.setRange(0, 999999)
-        form_layout.addRow("Stock Mínimo:", self.stock_min_input)
+        self.stock_min_input.setValue(5)  # Valor por defecto sugerido
+        self.stock_min_input.setToolTip(
+            "Stock mínimo para alertas de reabastecimiento.\n"
+            "Cuando el stock llegue a este nivel, aparecerá en la pestaña 'Pedidos'."
+        )
+        self.stock_min_input.setStyleSheet("""
+            QSpinBox {
+                background-color: #fff5f0;
+                border: 2px solid #cc785c;
+                padding: 4px;
+            }
+        """)
+        form_layout.addRow("Stock Mínimo*:", self.stock_min_input)
 
         # Unidad de medida
         self.unidad_input = QComboBox()

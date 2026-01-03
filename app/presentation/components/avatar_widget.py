@@ -72,7 +72,7 @@ class AvatarWidget(QWidget):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Dibujar círculo de fondo según el estado con colores pastel
+        # Dibujar círculo de fondo según el estado
         color = self.get_state_color()
         painter.setBrush(QColor(color))
         painter.setPen(Qt.NoPen)
@@ -88,9 +88,9 @@ class AvatarWidget(QWidget):
         self.avatar_label.setPixmap(pixmap)
 
     def get_state_color(self):
-        """Retorna el color según el estado actual - Tema Claude"""
+        """Retorna el color según el estado actual"""
         colors = {
-            "idle": "#cc785c",      # Naranja Claude
+            "idle": "#cc785c",      # Naranja
             "listening": "#6ba56a",  # Verde
             "thinking": "#d68a6e",   # Naranja claro
             "speaking": "#b86a50",   # Naranja oscuro
@@ -130,9 +130,9 @@ class AvatarWidget(QWidget):
         """Actualiza el texto del estado"""
         state_texts = {
             "idle": "Listo para ayudarte",
-            "listening": "🎤 Escuchando...",
-            "thinking": "💭 Procesando...",
-            "speaking": "💬 Respondiendo...",
+            "listening": "Escuchando...",
+            "thinking": "Procesando...",
+            "speaking": "Respondiendo...",
         }
         self.state_label.setText(state_texts.get(self.current_state, "Listo para ayudarte"))
 

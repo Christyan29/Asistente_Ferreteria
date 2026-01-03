@@ -27,6 +27,9 @@ def setup_logging():
         ]
     )
     logger = logging.getLogger(__name__)
+
+# TODO: Mejorar el manejo de errores en el inicio
+# TODO: Agregar splash screen de carga
     logger.info("=" * 60)
     logger.info(f"Iniciando {AppConfig.NAME} v{AppConfig.VERSION}")
     logger.info("=" * 60)
@@ -39,6 +42,9 @@ def check_database():
 
     if not db_path.exists():
         logger = logging.getLogger(__name__)
+
+# TODO: Mejorar el manejo de errores en el inicio
+# TODO: Agregar splash screen de carga
         logger.info("Base de datos no encontrada. Creando nueva base de datos...")
         try:
             init_database()
@@ -49,6 +55,9 @@ def check_database():
             return False
     else:
         logger = logging.getLogger(__name__)
+
+# TODO: Mejorar el manejo de errores en el inicio
+# TODO: Agregar splash screen de carga
         logger.info(f"Base de datos encontrada: {db_path}")
         return True
 

@@ -6,10 +6,11 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextBrowser,
     QLineEdit, QLabel, QPushButton
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QTextCursor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt5.QtGui import QTextCursor, QIcon
 from datetime import datetime
 import logging
+import re
 
 from app.presentation.components.avatar_widget import AvatarWidget
 from app.infrastructure.product_repository import ProductRepository
@@ -114,10 +115,10 @@ class AsistenteView(QWidget):
 
         # Nota sobre IA
         if self.groq_service.is_available():
-            note = QLabel("🤖 IA Activa (Groq)")
+            note = QLabel("IA Activa (Groq)")
             note.setStyleSheet("color: #6ba56a; font-size: 9pt; padding: 8px; background-color: #f0faf0; border-radius: 8px;")
         else:
-            note = QLabel("ℹ️ Modo básico")
+            note = QLabel("Modo básico")
             note.setStyleSheet("color: #d68a6e; font-size: 9pt; padding: 8px; background-color: #fef5f1; border-radius: 8px;")
         note.setAlignment(Qt.AlignCenter)
         layout.addWidget(note)
@@ -160,22 +161,37 @@ class AsistenteView(QWidget):
         self.message_input.returnPressed.connect(self.enviar_mensaje)
         layout.addWidget(self.message_input, stretch=4)
 
-        # Botón de voz
-        self.btn_voz = QPushButton("🎤")
+        # Botón de voz - CIRCULAR con icono grande
+        self.btn_voz = QPushButton("")
+        self.btn_voz.setIcon(QIcon("app/assets/icons/microphone.png"))
+        self.btn_voz.setIconSize(QSize(28, 28))  # Icono ajustado
         self.btn_voz.setToolTip("Hablar con Gabo")
-        self.btn_voz.setMaximumWidth(50)
+        self.btn_voz.setFixedSize(40, 40)  # Mismo tamaño que botón Enviar
+        self.btn_voz.setFocusPolicy(Qt.NoFocus)  # NO mantener foco
+        self.btn_voz.setAutoDefault(False)  # NO ser botón por defecto
+        self.btn_voz.setDefault(False)
         self.btn_voz.setStyleSheet("""
             QPushButton {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                border-radius: 25px;
-                font-size: 16px;
+                background-color: #cc785c;
+                border: none;
+                border-radius: 20px;  # Ajustado para 40px
+                padding: 2px;
+                outline: none;
             }
             QPushButton:hover {
-                background-color: #e0e0e0;
+                background-color: #b86a4d;
+            }
+            QPushButton:pressed {
+                background-color: #a85c42;
+            }
+            QPushButton:focus {
+                background-color: #cc785c;
+                border: none;
+                outline: none;
             }
             QPushButton:disabled {
                 background-color: #cccccc;
+                opacity: 0.6;
             }
         """)
 
@@ -316,6 +332,7 @@ class AsistenteView(QWidget):
         self.enviar_mensaje()
 
     def enviar_mensaje(self):
+        # DEBUG: A veces falla con mensajes muy largos, revisar
         """Envía un mensaje"""
         mensaje = self.message_input.text().strip()
         if not mensaje:
@@ -336,12 +353,21 @@ class AsistenteView(QWidget):
         # Procesar y obtener respuesta
         respuesta = self.procesar_mensaje(mensaje)
 
+        # Filtrar solo emojis e iconos, permitiendo acentos, eñes y signos de puntuación española
+        # Explicación: Permitimos a-z, A-Z, 0-9, espacios, puntuación básica y caracteres extendidos del español
+        respuesta_limpia = re.sub(r'[^a-zA-Z0-9\s.,!?¡¿áéíóúÁÉÍÓÚñÑüÜ:;()\-]', '', respuesta)
+        # Asegurar que no queden espacios dobles si se quitan emojis en medio
+        respuesta_limpia = re.sub(r'\s+', ' ', respuesta_limpia).strip()
+
+        # Si la limpieza dejó el texto vacío (raro), usar la original
+        final_text = respuesta_limpia if respuesta_limpia else respuesta
+
         # Mostrar respuesta
-        self.agregar_mensaje_asistente(respuesta)
+        self.agregar_mensaje_asistente(final_text)
 
         # Hablar respuesta
         logger.info(f"🗣️ Llamando a TTS.speak()")
-        self.tts_service.speak(respuesta)
+        self.tts_service.speak(final_text)
 
         # Emitir señal
         self.mensaje_enviado.emit(mensaje)
@@ -376,7 +402,7 @@ class AsistenteView(QWidget):
                 if not productos:
                     return "✅ No hay productos con stock bajo."
 
-                respuesta = f"⚠️ Hay {len(productos)} productos con stock bajo:<br><br>"
+                respuesta = f" Hay {len(productos)} productos con stock bajo:<br><br>"
                 for p in productos[:5]:
                     respuesta += f"• <b>{p.nombre}</b>: {p.stock} {p.unidad_medida}<br>"
                 return respuesta
@@ -393,7 +419,7 @@ class AsistenteView(QWidget):
 
             elif any(palabra in mensaje_lower for palabra in ["qué productos", "productos tienes", "total"]):
                 productos = self.producto_repo.get_all()
-                return f"📦 Tenemos {len(productos)} productos en total en nuestro inventario."
+                return f" Tenemos {len(productos)} productos en total en nuestro inventario."
 
             else:
                 # Búsqueda general
@@ -412,10 +438,9 @@ class AsistenteView(QWidget):
 
     def iniciar_escucha(self):
         """Inicia escucha de voz"""
-        logger.info("🎤 Iniciando escucha de voz...")
+        logger.info(" Iniciando escucha de voz...")
 
         self.btn_voz.setEnabled(False)
-        self.btn_voz.setStyleSheet("background-color: #ffcccc; border-radius: 25px;")
         self.info_label.setText("Escuchando... 👂")
         self.avatar.start_listening()
 
@@ -433,23 +458,12 @@ class AsistenteView(QWidget):
 
     def error_voz(self, error):
         """Maneja error de voz"""
-        logger.warning(f"⚠️ Error de voz: {error}")
+        logger.warning(f" Error de voz: {error}")
         self.info_label.setText(error)
 
     def fin_escucha(self):
         """Finaliza escucha"""
         self.btn_voz.setEnabled(True)
-        self.btn_voz.setStyleSheet("""
-            QPushButton {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                border-radius: 25px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-            }
-        """)
         self.info_label.setText("¿En qué puedo ayudarte hoy?")
         self.avatar.stop()
 
