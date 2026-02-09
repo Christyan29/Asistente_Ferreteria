@@ -191,6 +191,74 @@ class ProductRepository:
             if self._owns_session:
                 session.close()
 
+    def search_fuzzy(self, query: str, threshold: float = 0.6, solo_activos: bool = True) -> List[Producto]:
+        """
+        Búsqueda fuzzy para manejar errores de tipeo y variaciones.
+
+        Args:
+            query: Texto a buscar
+            threshold: Umbral de similitud (0.0-1.0), por defecto 0.6
+            solo_activos: Si True, solo busca en productos activos
+
+        Returns:
+            Lista de productos ordenados por similitud
+
+        Ejemplos:
+            "martilo" → encuentra "martillo" (error de tipeo)
+            "cemeto" → encuentra "cemento"
+        """
+        from difflib import SequenceMatcher
+
+        # 1. Intentar búsqueda exacta primero
+        exact_results = self.search(query, solo_activos)
+        if exact_results:
+            logger.info(f"✅ Búsqueda exacta encontró {len(exact_results)} resultados")
+            return exact_results
+
+        # 2. Búsqueda fuzzy
+        logger.info(f"🔍 Iniciando búsqueda fuzzy para '{query}' (threshold={threshold})")
+        all_products = self.get_all()
+        fuzzy_results = []
+
+        query_lower = query.lower()
+
+        for product in all_products:
+            # Filtrar solo activos si es necesario
+            if solo_activos and not product.activo:
+                continue
+
+            # Calcular similitud con nombre
+            similarity_nombre = SequenceMatcher(None, query_lower, product.nombre.lower()).ratio()
+
+            # Calcular similitud con descripción si existe
+            similarity_desc = 0.0
+            if product.descripcion:
+                similarity_desc = SequenceMatcher(None, query_lower, product.descripcion.lower()).ratio()
+
+            # Calcular similitud con marca si existe
+            similarity_marca = 0.0
+            if product.marca:
+                similarity_marca = SequenceMatcher(None, query_lower, product.marca.lower()).ratio()
+
+            # Tomar la mejor similitud
+            max_similarity = max(similarity_nombre, similarity_desc, similarity_marca)
+
+            if max_similarity >= threshold:
+                fuzzy_results.append((product, max_similarity))
+
+        # Ordenar por similitud (mayor a menor)
+        fuzzy_results.sort(key=lambda x: x[1], reverse=True)
+
+        # Retornar solo los productos (sin el score)
+        productos = [product for product, _ in fuzzy_results[:10]]
+
+        if productos:
+            logger.info(f"✅ Búsqueda fuzzy encontró {len(productos)} resultados")
+        else:
+            logger.info(f"❌ Búsqueda fuzzy no encontró resultados")
+
+        return productos
+
     def get_by_categoria(self, categoria_id: int, solo_activos: bool = True) -> List[Producto]:
         """
         Obtiene productos de una categoría específica.
@@ -422,6 +490,22 @@ class CategoriaRepository:
                 )
                 for m in models
             ]
+        finally:
+            if self._owns_session:
+                session.close()
+
+    def count_active_products(self) -> int:
+        """
+        Cuenta productos activos en inventario.
+
+        Returns:
+            Número total de productos activos
+        """
+        session = self._get_session()
+        try:
+            count = session.query(ProductoModel).filter(ProductoModel.activo == True).count()
+            logger.info(f"Total productos activos: {count}")
+            return count
         finally:
             if self._owns_session:
                 session.close()

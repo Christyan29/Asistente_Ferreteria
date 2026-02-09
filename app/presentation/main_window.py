@@ -14,6 +14,7 @@ import logging
 from app.presentation.inventario_view import InventarioView
 from app.presentation.asistente_view import AsistenteView
 from app.presentation.pedidos_view import PedidosView
+from app.presentation.historial_view import HistorialView  # ✅ NUEVO
 from app.presentation.login_dialog import LoginDialog
 from app.presentation.styles import get_stylesheet
 from app.config.settings import AppConfig
@@ -143,6 +144,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(btn_pedidos)
         self.nav_buttons.append(btn_pedidos)
 
+        # ✅ NUEVO: Botón Historial
+        btn_historial = self.create_modern_nav_button("Historial", 3, False)
+        layout.addWidget(btn_historial)
+        self.nav_buttons.append(btn_historial)
+
         return header
 
     def create_modern_nav_button(self, text, index, is_default=False):
@@ -188,13 +194,17 @@ class MainWindow(QMainWindow):
         self.pedidos_view = PedidosView()
         self.stacked_widget.addWidget(self.pedidos_view)
 
+        # ✅ NUEVO: Vista de Historial (siempre accesible)
+        self.historial_view = HistorialView()
+        self.stacked_widget.addWidget(self.historial_view)
+
         # Mostrar vista del asistente por defecto
         self.cambiar_vista(0)
 
     def cambiar_vista(self, index):
-        """Cambia la vista actual con autenticación para inventario y pedidos"""
-        # Si intenta acceder al inventario (index 1) o pedidos (index 2), verificar autenticación
-        if index in [1, 2]:
+        """Cambia la vista actual con autenticación para inventario, pedidos e historial"""
+        # Si intenta acceder al inventario (index 1), pedidos (index 2) o historial (index 3), verificar autenticación
+        if index in [1, 2, 3]:
             if not self.authenticated_user:
                 # Mostrar diálogo de login
                 login_dialog = LoginDialog(self)
@@ -214,13 +224,13 @@ class MainWindow(QMainWindow):
             else:
                 self.mostrar_vista_protegida(index)
         else:
-            # Vista del asistente, siempre accesible
+            # Vista del asistente (0), siempre accesible
             self.stacked_widget.setCurrentIndex(index)
             self.actualizar_botones_navegacion(index)
             self.statusBar().showMessage("Vista: Chat con Gabo")
 
     def mostrar_vista_protegida(self, index):
-        """Muestra vista protegida (Inventario o Pedidos) después de autenticación"""
+        """Muestra vista protegida (Inventario, Pedidos o Historial) después de autenticación"""
         self.stacked_widget.setCurrentIndex(index)
         self.actualizar_botones_navegacion(index)
 
@@ -228,6 +238,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Vista: Gestión de Inventario | Usuario: {self.authenticated_user}")
         elif index == 2:
             self.statusBar().showMessage(f"Vista: Pedidos | Usuario: {self.authenticated_user}")
+        elif index == 3:
+            self.statusBar().showMessage(f"Vista: Historial de Conversaciones | Usuario: {self.authenticated_user}")
+            # Recargar conversaciones al entrar a la vista
+            if hasattr(self, 'historial_view'):
+                self.historial_view.load_conversations()
 
     def actualizar_botones_navegacion(self, index):
         """Actualiza el estado de los botones de navegación"""

@@ -1,148 +1,160 @@
 """
-Servicio de IA usando Groq (Ultra rápido y gratis).
-Proporciona capacidades de conversación inteligente para el asistente Gabo.
+Servicio de IA usando Groq - VERSIÓN CORREGIDA
+Usa SYSTEM_PROMPT de settings.py y control de longitud adaptativo
 """
-import os
 import logging
+import re
 from typing import List, Dict, Optional
 from groq import Groq
+from app.config.settings import GroqConfig
 
 logger = logging.getLogger(__name__)
 
 
 class GroqService:
-    """Servicio para interactuar con Groq AI"""
+    """Servicio Groq con prompt correcto y control de longitud"""
 
     def __init__(self):
-        """Inicializa el servicio de Groq"""
-        self.api_key = os.getenv("GROQ_API_KEY")
-        self.model_name = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.api_key = GroqConfig.API_KEY
+        self.model_name = GroqConfig.MODEL
+        self.max_tokens = GroqConfig.MAX_TOKENS
+        self.temperature = GroqConfig.TEMPERATURE
+        self.top_p = GroqConfig.TOP_P
+
         self.conversation_history: List[Dict[str, str]] = []
         self.client = None
 
         if self.api_key and self.api_key != "your-api-key-here":
-            self._initialize_groq()
+            try:
+                self.client = Groq(api_key=self.api_key)
+                logger.info(f"✅ Groq inicializado - Modelo: {self.model_name}")
+            except Exception as e:
+                logger.error(f"❌ Error al inicializar Groq: {e}")
+                self.client = None
         else:
-            logger.warning("API key de Groq no configurada")
-
-    def _initialize_groq(self):
-        """Inicializa la conexión con Groq"""
-        try:
-            self.client = Groq(api_key=self.api_key)
-            logger.info(f"Groq inicializado correctamente con modelo {self.model_name}")
-
-        except Exception as e:
-            logger.error(f"Error al inicializar Groq: {e}")
-            self.client = None
-
-    def _get_system_prompt(self) -> str:
-        """Obtiene el prompt del sistema que define la personalidad de Gabo"""
-        return """Eres Gabo, el asistente virtual amigable de Ferretería Disensa en Pomasqui, Ecuador.
-
-TU PERSONALIDAD:
-- Eres amable, servicial y conocedor de productos de ferretería
-- Hablas en español de forma natural y cercana
-- Eres conciso pero completo en tus respuestas
-- Te enfocas en ayudar al cliente a encontrar lo que necesita
-
-TUS CAPACIDADES:
-- Ayudas a los clientes a buscar productos en el inventario
-- Recomiendas productos según las necesidades del cliente
-- Explicas usos y aplicaciones de productos de ferretería
-- Sugieres alternativas cuando un producto no está disponible
-- Respondes preguntas sobre herramientas, materiales de construcción, pinturas, electricidad, plomería, etc.
-
-TUS LIMITACIONES:
-- NO puedes procesar pagos ni ventas
-- NO puedes modificar el inventario
-- NO tienes acceso a precios exactos (solo puedes decir que están disponibles)
-- NO accedes a información personal de clientes
-
-- Respuestas cortas y directas (máximo 3-4 líneas)
-- NO uses emojis ni iconos en tus respuestas bajo ninguna circunstancia
-- Si no sabes algo, sé honesto y ofrece ayuda alternativa
-- Siempre mantén un tono profesional pero cercano
-
-IMPORTANTE: Cuando el cliente pregunte por productos específicos, asume que tienes acceso a un inventario de ferretería típica (herramientas, pinturas, materiales eléctricos, plomería, construcción, etc.)"""
+            logger.warning("⚠️ API key de Groq no configurada")
 
     def is_available(self) -> bool:
-        """Verifica si el servicio de Groq está disponible"""
         return self.client is not None
 
+    def _detect_question_type(self, user_message: str) -> str:
+        """Detecta tipo de pregunta para ajustar max_tokens"""
+        user_lower = user_message.lower()
+
+        # Productos específicos
+        if any(word in user_lower for word in ['tienen', 'buscar', 'stock', 'precio', 'disponible']):
+            return 'product'
+
+        # Instrucciones
+        if any(word in user_lower for word in ['como', 'instalar', 'reparar', 'pasos', 'instrucciones', 'pegar', 'instruccion', 'instruccione']):
+            return 'instruction'
+
+        # Fuera de tema
+        if any(word in user_lower for word in ['quien es', 'elon musk', 'sam altman', 'que hora', 'internet', 'inventó']):
+            return 'offtopic'
+
+        return 'general'
+
+    def _clean_response(self, response: str, question_type: str) -> str:
+        """Limpia y formatea respuesta"""
+
+        # 1. Corregir palabras pegadas comunes
+        response = response.replace('Herramientasmateriales', 'Herramientas/materiales')
+        response = response.replace('Herramientas materiales', 'Herramientas/materiales')
+        response = response.replace('Materialesnecesarios', 'Materiales necesarios')
+
+        # 2. Para instrucciones, delegar a InstructionFormatter
+        if question_type == 'instruction':
+            # ✅ NUEVO: Usar InstructionFormatter en lugar de regex frágil
+            from app.services.instruction_formatter import InstructionFormatter
+            logger.info("📋 Delegando formato de instrucciones a InstructionFormatter")
+            response = InstructionFormatter.force_correction(response)
+
+        # 3. Truncar si es demasiado largo
+        if question_type == 'product' and len(response) > 200:
+            response = response[:197] + "..."
+            logger.warning(f"⚠️ Respuesta de producto truncada ({len(response)} chars)")
+        elif question_type == 'offtopic' and len(response) > 300:
+            # Agregar redirección
+            response = response[:250] + "... ¿En qué más puedo ayudarte con ferretería?"
+            logger.warning(f"⚠️ Respuesta fuera de tema truncada y redirigida")
+
+        return response
+
     def chat_with_context(self, user_message: str, inventory_context: Optional[str] = None) -> str:
-        """
-        Envía un mensaje a Groq y obtiene una respuesta.
-
-        Args:
-            user_message: Mensaje del usuario
-            inventory_context: Contexto adicional del inventario (opcional)
-
-        Returns:
-            Respuesta de Groq
-        """
+        """Procesa mensajes usando SYSTEM_PROMPT correcto"""
         if not self.is_available():
-            raise Exception("Servicio de Groq no disponible. Verifica la API key.")
+            return "Lo siento, el servicio de IA no está disponible en este momento."
+
+        logger.info(f"📤 Pregunta: {user_message}")
+
+        # Detectar tipo de pregunta
+        question_type = self._detect_question_type(user_message)
+        logger.info(f"🔍 Tipo detectado: {question_type}")
+
+        # Ajustar max_tokens según tipo
+        max_tokens_map = {
+            'product': 50,      # ~20 palabras, 1-2 oraciones
+            'instruction': 300, # ~100 palabras, 4-5 pasos
+            'offtopic': 100,    # ✅ AUMENTADO: ~40 palabras, 3-4 oraciones (era 50)
+            'general': 100      # ~40 palabras, 2-3 oraciones
+        }
+        max_tokens = max_tokens_map.get(question_type, 150)
+        logger.info(f"🎯 Max tokens: {max_tokens}")
 
         try:
-            # Construir mensaje con contexto si está disponible
-            full_message = user_message
-            if inventory_context:
-                full_message = f"[Contexto del inventario: {inventory_context}]\n\nCliente: {user_message}"
-
-            # Preparar mensajes para Groq
+            # ✅ USAR SYSTEM_PROMPT DE SETTINGS.PY
             messages = [
-                {"role": "system", "content": self._get_system_prompt()}
+                {"role": "system", "content": GroqConfig.SYSTEM_PROMPT}
             ]
 
-            # Agregar historial de conversación (últimos 10 mensajes)
-            for msg in self.conversation_history[-10:]:
-                messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+            # Agregar historial (últimos 5 mensajes)
+            for msg in self.conversation_history[-5:]:
+                messages.append(msg)
+
+            # Agregar contexto de inventario si existe
+            if inventory_context:
+                user_message_with_context = f"[Contexto: {inventory_context}]\n\n{user_message}"
+            else:
+                user_message_with_context = user_message
 
             # Agregar mensaje actual
-            messages.append({
-                "role": "user",
-                "content": full_message
-            })
+            messages.append({"role": "user", "content": user_message_with_context})
 
-            # Enviar a Groq
+            # Llamar a Groq
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=500,
-                top_p=0.95
+                temperature=self.temperature,
+                max_tokens=max_tokens,  # ✅ ADAPTATIVO
+                top_p=self.top_p
             )
 
-            respuesta = response.choices[0].message.content
+            raw_response = response.choices[0].message.content
+            logger.info(f"📥 Respuesta cruda ({len(raw_response)} chars): {raw_response[:100]}...")
+
+            # ✅ POST-PROCESAMIENTO OBLIGATORIO
+            final_response = self._clean_response(raw_response, question_type)
+            logger.info(f"✅ Respuesta limpia ({len(final_response)} chars)")
 
             # Guardar en historial
-            self.conversation_history.append({
-                "role": "user",
-                "content": user_message
-            })
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": respuesta
-            })
+            self.conversation_history.append({"role": "user", "content": user_message})
+            self.conversation_history.append({"role": "assistant", "content": final_response})
 
-            logger.info(f"Respuesta de Groq generada exitosamente")
-            return respuesta
+            return final_response
 
         except Exception as e:
-            logger.error(f"Error al comunicarse con Groq: {e}")
-            raise Exception(f"Error al generar respuesta: {str(e)}")
+            logger.error(f"❌ Error: {e}")
+            return "Lo siento, hubo un error. Por favor, intenta de nuevo."
 
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """Obtiene el historial de la conversación"""
         return self.conversation_history
 
     def clear_history(self):
-        """Limpia el historial de conversación"""
+        """Limpia historial de conversación"""
         self.conversation_history = []
-        logger.info("Historial de conversación limpiado")
+        logger.info("🗑️ Historial limpiado")
 
     def get_product_recommendation(self, need: str, available_products: List[str]) -> str:
         """
@@ -168,25 +180,25 @@ Recomienda el producto más adecuado y explica brevemente por qué (máximo 2 l�
 
         try:
             messages = [
-                {"role": "system", "content": self._get_system_prompt()},
+                {"role": "system", "content": GroqConfig.SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ]
 
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=200
+                temperature=self.temperature,
+                max_tokens=200  # Respuestas cortas para recomendaciones
             )
 
             return response.choices[0].message.content
 
         except Exception as e:
-            logger.error(f"Error al obtener recomendación: {e}")
+            logger.error(f"❌ Error al obtener recomendación: {e}")
             raise
 
 
-# Instancia global del servicio
+# Instancia global
 _groq_service = None
 
 

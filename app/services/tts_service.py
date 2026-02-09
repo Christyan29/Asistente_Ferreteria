@@ -1,16 +1,16 @@
 """
-Servicio de Texto a Voz (TTS) - VERSIÓN CORREGIDA Y SIMPLIFICADA
+Servicio de Texto a Voz (TTS) - VERSIÓN CORREGIDA Y ROBUSTA
 """
 import pyttsx3
 import logging
 import threading
-import time
+import pythoncom
 from PyQt5.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
 class TTSService(QObject):
-    """Servicio TTS con threading corregido"""
+    """Servicio TTS con capacidad real de interrupción"""
 
     speaking_started = pyqtSignal()
     speaking_finished = pyqtSignal()
@@ -18,13 +18,13 @@ class TTSService(QObject):
     def __init__(self):
         super().__init__()
         self.is_speaking = False
+        self.current_engine = None  # Referencia al engine actual para poder detenerlo
         self._lock = threading.Lock()
         logger.info("TTSService inicializado")
 
     def speak(self, text):
         """
         Habla el texto en un hilo separado.
-        IMPORTANTE: Crea un nuevo engine en cada llamada para evitar problemas.
         """
         if not text or not text.strip():
             return
@@ -42,14 +42,17 @@ class TTSService(QObject):
 
     def _speak_thread(self, text):
         """Ejecuta TTS en hilo separado"""
-        with self._lock:
-            try:
+        # Necesario para pyttsx3 en hilos
+        pythoncom.CoInitialize()
+
+        try:
+            with self._lock:
                 self.is_speaking = True
                 self.speaking_started.emit()
-                logger.info("✅ Señal speaking_started emitida")
 
-                # CRÍTICO: Crear engine nuevo en cada llamada
+                # Inicializar engine
                 engine = pyttsx3.init()
+                self.current_engine = engine # Guardar referencia para stop()
 
                 # Configurar voz en español
                 try:
@@ -58,46 +61,36 @@ class TTSService(QObject):
                         voice_name = voice.name.lower()
                         if any(kw in voice_name for kw in ['spanish', 'es-', 'sabina', 'helena', 'mexico']):
                             engine.setProperty('voice', voice.id)
-                            logger.info(f"Voz seleccionada: {voice.name}")
                             break
-                except Exception as e:
-                    logger.warning(f"No se pudo configurar voz en español: {e}")
+                except Exception:
+                    pass
 
                 # Configurar velocidad y volumen
                 engine.setProperty('rate', 160)
                 engine.setProperty('volume', 1.0)
 
-                # Hablar
+                # Conectar evento de fin si es necesario, pero runAndWait maneja el bloqueo
+
                 logger.info("🗣️ Hablando...")
                 engine.say(text)
-                engine.runAndWait()
+                engine.runAndWait() # Bloquea hasta terminar o stop()
 
-                # Limpiar
-                try:
-                    engine.stop()
-                except:
-                    pass
-
-                logger.info("✅ TTS completado")
-
-            except Exception as e:
-                logger.error(f"❌ Error en TTS: {e}", exc_info=True)
-            finally:
-                self.is_speaking = False
-                self.speaking_finished.emit()
-                logger.info("✅ Señal speaking_finished emitida")
+        except Exception as e:
+            logger.error(f"❌ Error en TTS: {e}")
+        finally:
+            self.current_engine = None
+            self.is_speaking = False
+            pythoncom.CoUninitialize()
+            self.speaking_finished.emit()
+            logger.info("✅ TTS Finalizado")
 
     def stop(self):
-        """Detiene el habla (si es posible)"""
+        """Detiene el habla INMEDIATAMENTE"""
+        if self.current_engine:
+            logger.info("🛑 Forzando detención de TTS...")
+            try:
+                # stop() debe llamarse en el engine activo
+                self.current_engine.stop()
+            except Exception as e:
+                logger.error(f"Error al detener engine: {e}")
         self.is_speaking = False
-
-
-# Instancia global
-_tts_service = None
-
-def get_tts_service():
-    """Obtiene la instancia global del servicio TTS"""
-    global _tts_service
-    if _tts_service is None:
-        _tts_service = TTSService()
-    return _tts_service

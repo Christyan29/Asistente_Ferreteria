@@ -1,6 +1,5 @@
 """
-Punto de entrada principal de la aplicación.
-Inicializa la aplicación PyQt5 y la ventana principal.
+Parte principal de la aplicación,se inicialisa la aplicación pyQt5 y la ventana principal
 """
 import sys
 import logging
@@ -8,7 +7,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
 
-# Configurar el path para imports
+# Configuracion del path par las importaciones
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.config.settings import LoggingConfig, AppConfig, DATABASE_DIR
@@ -28,8 +27,6 @@ def setup_logging():
     )
     logger = logging.getLogger(__name__)
 
-# TODO: Mejorar el manejo de errores en el inicio
-# TODO: Agregar splash screen de carga
     logger.info("=" * 60)
     logger.info(f"Iniciando {AppConfig.NAME} v{AppConfig.VERSION}")
     logger.info("=" * 60)
@@ -43,8 +40,7 @@ def check_database():
     if not db_path.exists():
         logger = logging.getLogger(__name__)
 
-# TODO: Mejorar el manejo de errores en el inicio
-# TODO: Agregar splash screen de carga
+
         logger.info("Base de datos no encontrada. Creando nueva base de datos...")
         try:
             init_database()
@@ -56,8 +52,7 @@ def check_database():
     else:
         logger = logging.getLogger(__name__)
 
-# TODO: Mejorar el manejo de errores en el inicio
-# TODO: Agregar splash screen de carga
+
         logger.info(f"Base de datos encontrada: {db_path}")
         return True
 
@@ -73,25 +68,25 @@ def main():
             print("Error: No se pudo inicializar la base de datos")
             return 1
 
+        # Configurar atributos de la aplicación (DEBE SER ANTES DE CREAR QApplication)
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
         # Crear aplicación Qt
         app = QApplication(sys.argv)
         app.setApplicationName(AppConfig.NAME)
         app.setApplicationVersion(AppConfig.VERSION)
 
-        # Configurar atributos de la aplicación
-        app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-        app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
         logger.info("Aplicación Qt inicializada")
 
-        # Crear y mostrar ventana principal
+        # mostrar la ventan principal
         window = MainWindow()
         window.show()
 
         logger.info("Ventana principal mostrada")
         logger.info("Aplicación lista para usar")
 
-        # Ejecutar aplicación
+        #se ejecuta la aplicacion
         exit_code = app.exec_()
 
         logger.info(f"Aplicación finalizada con código: {exit_code}")
@@ -100,7 +95,7 @@ def main():
     except Exception as e:
         logger.error(f"Error fatal en la aplicación: {e}", exc_info=True)
 
-        # Mostrar mensaje de error al usuario
+        # mensaje de error al usuaro
         try:
             QMessageBox.critical(
                 None,

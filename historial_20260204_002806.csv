@@ -1,0 +1,9 @@
+Fecha,Hora,Pregunta,Respuesta,Tipo,Fuente,Tiempo (ms),Productos
+2026-02-04,05:27:19,tienen martillos?,"Sí, tenemos martillos. Disponible: Martillo de Carpintero (30 unidades a 12.50) y Martillo (10 unidades a 1.50).",general,database+groq,764,"Martillo de Carpintero, Martillo"
+2026-02-04,05:27:31,quien es elon musk?,No encontré productos con quien es elon musk?. Intenta con otro término.,general,database+groq,5,"Martillo de Carpintero, Martillo"
+2026-02-04,05:27:40,quein es donal trump,No encontré productos con quein es donal trump. Intenta con otro término.,general,database+groq,5,"Martillo de Carpintero, Martillo"
+2026-02-04,05:23:55,¿Qué productos tienes?,Tenemos 29 productos en total.,general,groq,21,
+2026-02-04,05:24:07,tienen martiloss?,"Sí, tenemos martillo. Disponible: 10 unidades a 1.50.",general,database+groq,1045,Martillo
+2026-02-04,05:24:19,"tienen ,artillo","Sí, tenemos Martillo de Carpintero y Martillo. Consulta en tienda para disponibilidad.",general,database+groq,669,"Martillo de Carpintero, Martillo"
+2026-02-04,05:24:38,quien es elon musk?,No encontré productos con quien es elon musk?. Intenta con otro término.,general,database+groq,6,"Martillo de Carpintero, Martillo"
+2026-02-04,05:24:56,quein es elon musk?,No encontré productos con quein es elon musk?. Intenta con otro término.,general,database+groq,6,"Martillo de Carpintero, Martillo"

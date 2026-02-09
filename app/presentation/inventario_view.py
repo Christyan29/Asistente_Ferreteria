@@ -68,72 +68,136 @@ class InventarioView(QWidget):
     def create_search_bar(self):
         """Crea la barra de búsqueda y filtros"""
         layout = QHBoxLayout()
+        layout.setSpacing(10)
 
         # Campo de búsqueda
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Buscar por nombre, código o marca...")
+        self.search_input.setMinimumHeight(40)
         self.search_input.textChanged.connect(self.buscar_productos)
-        layout.addWidget(self.search_input, stretch=3)
+        layout.addWidget(self.search_input, stretch=4)
+
+        # Estilo unificado para desplegables (con flechitas)
+        combo_style = """
+            QComboBox, QPushButton#stockBajoButton {
+                border: 1px solid #dcdcdc;
+                border-radius: 8px;
+                padding: 5px 15px;
+                background-color: white;
+                min-height: 32px;
+                text-align: left;
+            }
+            QComboBox:hover, QPushButton#stockBajoButton:hover {
+                border: 1px solid #cc785c;
+                background-color: #fffaf9;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;            /* Triángulo ▼ */
+                border-right: 5px solid transparent;
+                border-top: 5px solid #666;
+                width: 0;
+                height: 0;
+                margin-right: 15px;
+            }
+            QPushButton#stockBajoButton::menu-indicator {
+                image: none;
+                border-left: 5px solid transparent;            /* Triángulo ▼ */
+                border-right: 5px solid transparent;
+                border-top: 5px solid #666;
+                width: 0;
+                height: 0;
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 15px;
+            }
+        """
 
         # Filtro por categoría
         self.categoria_filter = QComboBox()
         self.categoria_filter.addItem("Todas las categorías", None)
+        self.categoria_filter.setStyleSheet(combo_style)
         self.categoria_filter.currentIndexChanged.connect(self.filtrar_por_categoria)
         layout.addWidget(self.categoria_filter, stretch=1)
 
-        # Filtro de stock bajo (Menú)
+        # Filtro de stock bajo (Botón con Menú)
         self.stock_bajo_btn = QPushButton("Stock Bajo")
         self.stock_bajo_btn.setObjectName("stockBajoButton")
+        self.stock_bajo_btn.setMinimumHeight(40)
+        self.stock_bajo_btn.setStyleSheet(combo_style)
         self.setup_stock_bajo_menu()
-        layout.addWidget(self.stock_bajo_btn)
+        layout.addWidget(self.stock_bajo_btn, stretch=1)
 
         return layout
 
     def create_action_buttons(self):
         """Crea los botones de acción"""
         layout = QHBoxLayout()
+        layout.setSpacing(10)
 
-        # Botón agregar
+        # Botones principales (Izquierda)
         self.btn_agregar = QPushButton("Agregar Producto")
         self.btn_agregar.setObjectName("successButton")
+        self.btn_agregar.setMinimumHeight(38)
         self.btn_agregar.clicked.connect(self.agregar_producto)
         layout.addWidget(self.btn_agregar)
 
-        # Botón editar
         self.btn_editar = QPushButton("Editar")
         self.btn_editar.setObjectName("primaryButton")
+        self.btn_editar.setMinimumHeight(38)
         self.btn_editar.clicked.connect(self.editar_producto)
         self.btn_editar.setEnabled(False)
         layout.addWidget(self.btn_editar)
 
-        # Botón eliminar
         self.btn_eliminar = QPushButton("Eliminar")
         self.btn_eliminar.setObjectName("dangerButton")
+        self.btn_eliminar.setMinimumHeight(38)
         self.btn_eliminar.clicked.connect(self.eliminar_producto)
         self.btn_eliminar.setEnabled(False)
         layout.addWidget(self.btn_eliminar)
 
-        # Separador
+        # Espaciador central
         layout.addStretch()
 
-        # Botón importar Excel
+        # Botones de mantenimiento (Derecha)
         self.btn_importar = QPushButton("Importar Excel")
+        self.btn_importar.setMinimumHeight(38)
+        self.btn_importar.setFixedWidth(130)
         self.btn_importar.clicked.connect(self.importar_excel)
         self.btn_importar.setStyleSheet("""
             QPushButton {
-                background-color: #f0f0f0;
-                color: #333;
-                border: 1px solid #ccc;
+                background-color: #f8f9fa;
+                color: #444;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #e0e0e0;
+                background-color: #e9ecef;
+                border: 1px solid #ced4da;
             }
         """)
         layout.addWidget(self.btn_importar)
 
-        # Botón refrescar
         self.btn_refrescar = QPushButton("Refrescar")
+        self.btn_refrescar.setMinimumHeight(38)
+        self.btn_refrescar.setFixedWidth(110)
         self.btn_refrescar.clicked.connect(self.cargar_datos)
+        self.btn_refrescar.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #666;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #f1f3f5;
+            }
+        """)
         layout.addWidget(self.btn_refrescar)
 
         return layout
@@ -141,9 +205,9 @@ class InventarioView(QWidget):
     def create_products_table(self):
         """Crea la tabla de productos"""
         table = QTableWidget()
-        table.setColumnCount(8)
+        table.setColumnCount(9)
         table.setHorizontalHeaderLabels([
-            "Código", "Nombre", "Categoría", "Precio", "Stock",
+            "Seleccionar", "Código", "Nombre", "Categoría", "Precio", "Stock",
             "Stock Mín.", "Unidad", "Marca"
         ])
 
@@ -154,17 +218,34 @@ class InventarioView(QWidget):
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         table.verticalHeader().setVisible(False)
 
-        # Ajuste de columnas
+        # Ajuste de columnas y estilos
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Nombre ajustable
-        table.setColumnWidth(1, 280) # Ancho inicial razonable
-        header.setSectionResizeMode(7, QHeaderView.Stretch)      # Marca se estira
+
+        # Selección Centrada
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        table.setColumnWidth(0, 100)
+
+        # Distribución Proporcional
+        header.setSectionResizeMode(2, QHeaderView.Stretch)      # Nombre se expande más
+        header.setSectionResizeMode(8, QHeaderView.Stretch)      # Marca se expande
         header.setStretchLastSection(False)
 
-        # Conectar señal de selección
+        # CSS para centrar checkboxes
+        table.setStyleSheet("""
+            QTableWidget::indicator {
+                subcontrol-origin: padding;
+                subcontrol-position: center;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+        """)
+
+        # Conectar señales
         table.itemSelectionChanged.connect(self.on_selection_changed)
         table.doubleClicked.connect(self.editar_producto)
+        table.itemChanged.connect(self.on_item_changed)
 
         return table
 
@@ -200,19 +281,25 @@ class InventarioView(QWidget):
         self.table.setRowCount(len(productos))
 
         for row, producto in enumerate(productos):
+            # Checkbox de selección
+            chk_item = QTableWidgetItem()
+            chk_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk_item.setCheckState(Qt.Unchecked)
+            self.table.setItem(row, 0, chk_item)
+
             # Código
-            self.table.setItem(row, 0, QTableWidgetItem(producto.codigo or ""))
+            self.table.setItem(row, 1, QTableWidgetItem(producto.codigo or ""))
 
             # Nombre
-            self.table.setItem(row, 1, QTableWidgetItem(producto.nombre))
+            self.table.setItem(row, 2, QTableWidgetItem(producto.nombre))
 
             # Categoría
-            self.table.setItem(row, 2, QTableWidgetItem(producto.categoria_nombre or "Sin categoría"))
+            self.table.setItem(row, 3, QTableWidgetItem(producto.categoria_nombre or "Sin categoría"))
 
             # Precio
             precio_item = QTableWidgetItem(producto.precio_formateado)
             precio_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, 3, precio_item)
+            self.table.setItem(row, 4, precio_item)
 
             # Stock
             stock_item = QTableWidgetItem(str(producto.stock))
@@ -221,18 +308,18 @@ class InventarioView(QWidget):
             if producto.stock_bajo:
                 stock_item.setBackground(QColor("#f38ba8"))
                 stock_item.setForeground(QColor("#1e1e2e"))
-            self.table.setItem(row, 4, stock_item)
+            self.table.setItem(row, 5, stock_item)
 
             # Stock mínimo
             stock_min_item = QTableWidgetItem(str(producto.stock_minimo))
             stock_min_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 5, stock_min_item)
+            self.table.setItem(row, 6, stock_min_item)
 
             # Unidad
-            self.table.setItem(row, 6, QTableWidgetItem(producto.unidad_medida))
+            self.table.setItem(row, 7, QTableWidgetItem(producto.unidad_medida))
 
             # Marca
-            self.table.setItem(row, 7, QTableWidgetItem(producto.marca or ""))
+            self.table.setItem(row, 8, QTableWidgetItem(producto.marca or ""))
 
         # En la header de la tabla ya se configuró el auto-ajuste
         # self.table.resizeColumnsToContents() # Eliminado para evitar smashed columns iniciales
@@ -279,9 +366,25 @@ class InventarioView(QWidget):
     def setup_stock_bajo_menu(self):
         """Configura el menú desplegable del botón Stock Bajo"""
         menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #dcdcdc;
+                border-radius: 8px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 10px 30px 10px 15px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #fff2ed;
+                color: #cc785c;
+            }
+        """)
 
         # Acción: Ver productos en stock bajo (filtro)
-        self.action_ver_stock_bajo = QAction("Ver Productos con Stock Bajo", self)
+        self.action_ver_stock_bajo = QAction("Ver productos con bajo stock", self)
         self.action_ver_stock_bajo.setCheckable(True)
         self.action_ver_stock_bajo.triggered.connect(lambda: self.filtrar_stock_bajo(self.action_ver_stock_bajo.isChecked()))
         menu.addAction(self.action_ver_stock_bajo)
@@ -289,14 +392,14 @@ class InventarioView(QWidget):
         menu.addSeparator()
 
         # Acción: Configurar stock mínimo global
-        action_global = QAction("Configurar Stock Mínimo (Todos...)", self)
+        action_global = QAction("Fijar stock mínimo a todos", self)
         action_global.triggered.connect(self.configurar_stock_global)
         menu.addAction(action_global)
 
         # Acción: Configurar stock mínimo para producto seleccionado
-        self.action_individual = QAction("Configurar Stock Mínimo (Seleccionado...)", self)
+        self.action_individual = QAction("Fijar stock mínimo a este producto", self)
         self.action_individual.triggered.connect(self.configurar_stock_especifico)
-        self.action_individual.setEnabled(False)
+        self.action_individual.setEnabled(True)
         menu.addAction(self.action_individual)
 
         self.stock_bajo_btn.setMenu(menu)
@@ -345,6 +448,11 @@ class InventarioView(QWidget):
         """Abre un diálogo rápido para el producto seleccionado"""
         producto = self.get_selected_producto()
         if not producto:
+            QMessageBox.warning(
+                self,
+                "Sin Selección",
+                "Por favor, selecciona primero un producto de la tabla para ajustar su stock mínimo."
+            )
             return
 
         dialog = QDialog(self)
@@ -395,15 +503,45 @@ class InventarioView(QWidget):
         if hasattr(self, 'action_individual'):
             self.action_individual.setEnabled(has_selection)
 
-    def get_selected_producto(self):
-        """Obtiene el producto seleccionado"""
-        selected_rows = self.table.selectionModel().selectedRows()
-        if not selected_rows:
-            return None
+    def on_item_changed(self, item):
+        """Maneja el cambio en una celda (para los checkboxes de selección única)"""
+        if item.column() == 0:
+            if item.checkState() == Qt.Checked:
+                # Desmarcar los demás
+                self.table.blockSignals(True)
+                for row in range(self.table.rowCount()):
+                    if row != item.row():
+                        other_item = self.table.item(row, 0)
+                        if other_item:
+                            other_item.setCheckState(Qt.Unchecked)
+                self.table.blockSignals(False)
 
-        row = selected_rows[0].row()
-        if row < len(self.productos_actuales):
-            return self.productos_actuales[row]
+            # Actualizar estado de botones basado en si hay algún checkbox marcado
+            hay_marcado = False
+            for row in range(self.table.rowCount()):
+                check_item = self.table.item(row, 0)
+                if check_item and check_item.checkState() == Qt.Checked:
+                    hay_marcado = True
+                    break
+
+            # Podríamos habilitar/deshabilitar botones aquí si fuera necesario
+            pass
+
+    def get_selected_producto(self):
+        """Obtiene el producto seleccionado mediante el checkbox"""
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.checkState() == Qt.Checked:
+                if row < len(self.productos_actuales):
+                    return self.productos_actuales[row]
+
+        # Fallback para botones Editar/Eliminar si usan la selección estándar de fila
+        selected_rows = self.table.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            if row < len(self.productos_actuales):
+                return self.productos_actuales[row]
+
         return None
 
     def agregar_producto(self):

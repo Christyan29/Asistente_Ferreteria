@@ -11,6 +11,7 @@ import logging
 
 from app.config.settings import DatabaseConfig
 from app.infrastructure.models.producto import Base, ProductoModel, CategoriaModel
+from app.infrastructure.models.conversation import ConversationModel, InteractionModel  # ✅ NUEVO
 
 logger = logging.getLogger(__name__)
 
