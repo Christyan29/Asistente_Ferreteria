@@ -36,6 +36,9 @@ class MainWindow(QMainWindow):
         # Aplicar estilos
         self.setStyleSheet(get_stylesheet())
 
+        # Actualizar visibilidad de botones según estado inicial de autenticación
+        self.actualizar_navegacion_por_auth()
+
         logger.info("Ventana principal inicializada")
 
     def setup_window(self):
@@ -138,16 +141,19 @@ class MainWindow(QMainWindow):
         btn_inventario = self.create_modern_nav_button("Inventario", 1, False)
         layout.addWidget(btn_inventario)
         self.nav_buttons.append(btn_inventario)
+        btn_inventario.hide()  # Ocultar al inicio (requiere autenticación)
 
         # Botón Pedidos
         btn_pedidos = self.create_modern_nav_button("Pedidos", 2, False)
         layout.addWidget(btn_pedidos)
         self.nav_buttons.append(btn_pedidos)
+        btn_pedidos.hide()  # Ocultar al inicio (requiere autenticación)
 
         # ✅ NUEVO: Botón Historial
         btn_historial = self.create_modern_nav_button("Historial", 3, False)
         layout.addWidget(btn_historial)
         self.nav_buttons.append(btn_historial)
+        btn_historial.hide()  # Ocultar al inicio (requiere autenticación)
 
         return header
 
@@ -212,6 +218,7 @@ class MainWindow(QMainWindow):
                     if login_dialog.is_authenticated():
                         self.authenticated_user = login_dialog.get_username()
                         logger.info(f"Usuario autenticado: {self.authenticated_user}")
+                        self.actualizar_navegacion_por_auth()  # Mostrar botones protegidos
                         self.mostrar_vista_protegida(index)
                     else:
                         # Volver a la vista del asistente
@@ -248,6 +255,37 @@ class MainWindow(QMainWindow):
         """Actualiza el estado de los botones de navegación"""
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
+
+    def actualizar_navegacion_por_auth(self):
+        """
+        Actualiza visibilidad de botones de navegación según estado de autenticación.
+
+        IMPORTANTE: Este método NO modifica el estado de autenticación,
+        solo refleja su valor actual en la UI.
+
+        Comportamiento:
+        - Si authenticated_user es None: Oculta botones protegidos (Inventario, Pedidos, Historial)
+        - Si authenticated_user tiene valor: Muestra botones protegidos
+
+        Llamado desde:
+        - __init__() (línea 39): Estado inicial
+        - cambiar_vista() (línea 215): Tras autenticación exitosa
+        - cerrar_sesion() (línea 347): Tras cerrar sesión
+        """
+        if self.authenticated_user:
+            # Usuario autenticado: Mostrar botones protegidos
+            self.nav_buttons[1].show()  # Inventario
+            self.nav_buttons[2].show()  # Pedidos
+            self.nav_buttons[3].show()  # Historial
+
+            logger.info(f"✅ Botones protegidos mostrados (usuario: {self.authenticated_user})")
+        else:
+            # Usuario NO autenticado: Ocultar botones protegidos
+            self.nav_buttons[1].hide()  # Inventario
+            self.nav_buttons[2].hide()  # Pedidos
+            self.nav_buttons[3].hide()  # Historial
+
+            logger.info("🔒 Botones protegidos ocultos (sin autenticación)")
 
     def setup_menu(self):
         """Configura el menú de la aplicación"""
@@ -343,6 +381,7 @@ class MainWindow(QMainWindow):
 
             if respuesta == QMessageBox.Yes:
                 self.authenticated_user = None
+                self.actualizar_navegacion_por_auth()  # Ocultar botones protegidos
                 self.cambiar_vista(0)  # Volver al asistente
                 QMessageBox.information(self, "Sesión Cerrada", "Sesión cerrada correctamente")
                 logger.info("Sesión de inventario cerrada")
