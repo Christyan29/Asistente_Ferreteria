@@ -12,6 +12,10 @@ import logging
 from app.config.settings import DatabaseConfig
 from app.infrastructure.models.producto import Base, ProductoModel, CategoriaModel
 from app.infrastructure.models.conversation import ConversationModel, InteractionModel  # ✅ NUEVO
+from app.infrastructure.models.proveedor import (  # ✅ NUEVO: sistema de proveedores y pedidos
+    ProveedorModel, ProductoProveedorModel,
+    PedidoProveedorModel, DetallePedidoModel,
+)
 
 logger = logging.getLogger(__name__)
 

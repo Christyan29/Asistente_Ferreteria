@@ -259,6 +259,31 @@ class ProductRepository:
 
         return productos
 
+    def get_all_product_names(self) -> List[str]:
+        """
+        Obtiene lista de nombres de todos los productos activos.
+        Usado para lista blanca dinámica en extracción de entidades.
+
+        Returns:
+            Lista de nombres de productos (strings)
+        """
+        session = self._get_session()
+        try:
+            productos = session.query(ProductoModel.nombre).filter(
+                ProductoModel.activo == True
+            ).all()
+
+            nombres = [p.nombre for p in productos]
+            logger.info(f"📋 Lista blanca cargada: {len(nombres)} productos")
+            return nombres
+
+        except Exception as e:
+            logger.error(f"Error al obtener nombres de productos: {e}")
+            return []
+        finally:
+            if self._owns_session:
+                session.close()
+
     def get_by_categoria(self, categoria_id: int, solo_activos: bool = True) -> List[Producto]:
         """
         Obtiene productos de una categoría específica.

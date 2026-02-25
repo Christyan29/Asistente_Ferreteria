@@ -14,15 +14,10 @@ import logging
 from app.presentation.inventario_view import InventarioView
 from app.presentation.asistente_view import AsistenteView
 from app.presentation.pedidos_view import PedidosView
-from app.presentation.historial_view import HistorialView          # ✅ NUEVO
-from app.presentation.proveedores_view import ProveedoresView       # ✅ NUEVO
+from app.presentation.historial_view import HistorialView  # ✅ NUEVO
 from app.presentation.login_dialog import LoginDialog
 from app.presentation.styles import get_stylesheet
 from app.config.settings import AppConfig
-from app.services.stock_monitor import StockMonitorService           # ✅ NUEVO
-from app.presentation.components.alerta_autorizacion_dialog import (
-    AlertaAutorizacionDialog, productos_ignorados_hoy
-)  # ✅ NUEVO
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +35,6 @@ class MainWindow(QMainWindow):
 
         # Aplicar estilos
         self.setStyleSheet(get_stylesheet())
-
-        # Actualizar visibilidad de botones según estado inicial de autenticación
-        self.actualizar_navegacion_por_auth()
-
-        # ✅ NUEVO: Crear monitor de stock (inactivo hasta que el usuario se autentique)
-        self._monitor_stock = StockMonitorService(parent=self)
-        self._monitor_stock.alertas_detectadas.connect(self._on_alertas_stock)
 
         logger.info("Ventana principal inicializada")
 
@@ -150,45 +138,16 @@ class MainWindow(QMainWindow):
         btn_inventario = self.create_modern_nav_button("Inventario", 1, False)
         layout.addWidget(btn_inventario)
         self.nav_buttons.append(btn_inventario)
-        btn_inventario.hide()  # Ocultar al inicio (requiere autenticación)
 
         # Botón Pedidos
         btn_pedidos = self.create_modern_nav_button("Pedidos", 2, False)
         layout.addWidget(btn_pedidos)
         self.nav_buttons.append(btn_pedidos)
-        btn_pedidos.hide()  # Ocultar al inicio (requiere autenticación)
 
-        # ✅ Botón Historial
+        # ✅ NUEVO: Botón Historial
         btn_historial = self.create_modern_nav_button("Historial", 3, False)
         layout.addWidget(btn_historial)
         self.nav_buttons.append(btn_historial)
-        btn_historial.hide()
-
-        # ✅ Botón Proveedores – ahora navega a pestaña (index 4)
-        btn_proveedores = QPushButton("Proveedores")
-        btn_proveedores.setObjectName("btnProveedores")
-        btn_proveedores.setMinimumWidth(110)
-        btn_proveedores.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #4a5568;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 11pt;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #f7fafc;
-            }
-            QPushButton:pressed {
-                background-color: #e2e8f0;
-            }
-        """)
-        btn_proveedores.clicked.connect(lambda: self.cambiar_vista(4))
-        layout.addWidget(btn_proveedores)
-        self._btn_proveedores = btn_proveedores
-        btn_proveedores.hide()
 
         return header
 
@@ -223,45 +182,43 @@ class MainWindow(QMainWindow):
 
     def create_views(self):
         """Crea las vistas de la aplicación"""
-        # Vista del Asistente – siempre accesible
+        # Vista del Asistente (siempre accesible)
         self.asistente_view = AsistenteView()
-        self.stacked_widget.addWidget(self.asistente_view)  # index 0
+        self.stacked_widget.addWidget(self.asistente_view)
 
-        # Vista de Inventario – requiere autenticación
+        # Vista de Inventario (requiere autenticación)
         self.inventario_view = InventarioView()
-        self.stacked_widget.addWidget(self.inventario_view)  # index 1
+        self.stacked_widget.addWidget(self.inventario_view)
 
-        # Vista de Pedidos – requiere autenticación
-        self.pedidos_view = PedidosView(authenticated_user=self.authenticated_user)
-        self.stacked_widget.addWidget(self.pedidos_view)  # index 2
+        # Vista de Pedidos (requiere autenticación)
+        self.pedidos_view = PedidosView()
+        self.stacked_widget.addWidget(self.pedidos_view)
 
-        # Vista de Historial – requiere autenticación
+        # ✅ NUEVO: Vista de Historial (siempre accesible)
         self.historial_view = HistorialView()
-        self.stacked_widget.addWidget(self.historial_view)  # index 3
-
-        # Vista de Proveedores – requiere autenticación
-        self.proveedores_view = ProveedoresView()
-        self.stacked_widget.addWidget(self.proveedores_view)  # index 4
+        self.stacked_widget.addWidget(self.historial_view)
 
         # Mostrar vista del asistente por defecto
         self.cambiar_vista(0)
 
     def cambiar_vista(self, index):
-        """Cambia la vista actual. Protegidas: 1=Inventario, 2=Pedidos, 3=Historial, 4=Proveedores"""
-        if index in [1, 2, 3, 4]:
+        """Cambia la vista actual con autenticación para inventario, pedidos e historial"""
+        # Si intenta acceder al inventario (index 1), pedidos (index 2) o historial (index 3), verificar autenticación
+        if index in [1, 2, 3]:
             if not self.authenticated_user:
+                # Mostrar diálogo de login
                 login_dialog = LoginDialog(self)
                 if login_dialog.exec_() == login_dialog.Accepted:
                     if login_dialog.is_authenticated():
                         self.authenticated_user = login_dialog.get_username()
                         logger.info(f"Usuario autenticado: {self.authenticated_user}")
-                        self.actualizar_navegacion_por_auth()
-                        self._monitor_stock.iniciar(verificar_ahora=True)
                         self.mostrar_vista_protegida(index)
                     else:
+                        # Volver a la vista del asistente
                         self.cambiar_vista(0)
                         return
                 else:
+                    # Usuario canceló, volver al asistente
                     self.cambiar_vista(0)
                     return
             else:
@@ -273,7 +230,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Vista: Chat con Gabo")
 
     def mostrar_vista_protegida(self, index):
-        """Muestra vista protegida tras autenticación."""
+        """Muestra vista protegida (Inventario, Pedidos o Historial) después de autenticación"""
         self.stacked_widget.setCurrentIndex(index)
         self.actualizar_botones_navegacion(index)
 
@@ -283,53 +240,14 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Vista: Pedidos | Usuario: {self.authenticated_user}")
         elif index == 3:
             self.statusBar().showMessage(f"Vista: Historial de Conversaciones | Usuario: {self.authenticated_user}")
+            # Recargar conversaciones al entrar a la vista
             if hasattr(self, 'historial_view'):
                 self.historial_view.load_conversations()
-        elif index == 4:
-            self.statusBar().showMessage(f"Vista: Proveedores | Usuario: {self.authenticated_user}")
-
-
 
     def actualizar_botones_navegacion(self, index):
         """Actualiza el estado de los botones de navegación"""
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
-
-    def actualizar_navegacion_por_auth(self):
-        """
-        Actualiza visibilidad de botones de navegación según estado de autenticación.
-
-        IMPORTANTE: Este método NO modifica el estado de autenticación,
-        solo refleja su valor actual en la UI.
-
-        Comportamiento:
-        - Si authenticated_user es None: Oculta botones protegidos (Inventario, Pedidos, Historial)
-        - Si authenticated_user tiene valor: Muestra botones protegidos
-
-        Llamado desde:
-        - __init__() (línea 39): Estado inicial
-        - cambiar_vista() (línea 215): Tras autenticación exitosa
-        - cerrar_sesion() (línea 347): Tras cerrar sesión
-        """
-        if self.authenticated_user:
-            # Usuario autenticado: Mostrar botones protegidos
-            self.nav_buttons[1].show()  # Inventario
-            self.nav_buttons[2].show()  # Pedidos
-            self.nav_buttons[3].show()  # Historial
-            if hasattr(self, '_btn_proveedores'):
-                self._btn_proveedores.show()  # Proveedores
-
-            logger.info(f"✅ Botones protegidos mostrados (usuario: {self.authenticated_user})")
-        else:
-            # Usuario NO autenticado: Ocultar botones protegidos
-            self.nav_buttons[1].hide()  # Inventario
-            self.nav_buttons[2].hide()  # Pedidos
-            self.nav_buttons[3].hide()  # Historial
-            if hasattr(self, '_btn_proveedores'):
-                self._btn_proveedores.hide()  # Proveedores
-
-            logger.info("🔒 Botones protegidos ocultos (sin autenticación)")
-
 
     def setup_menu(self):
         """Configura el menú de la aplicación"""
@@ -425,69 +343,11 @@ class MainWindow(QMainWindow):
 
             if respuesta == QMessageBox.Yes:
                 self.authenticated_user = None
-                # ✅ NUEVO: detener monitor al cerrar sesión
-                self._monitor_stock.detener()
-                self.actualizar_navegacion_por_auth()  # Ocultar botones protegidos
                 self.cambiar_vista(0)  # Volver al asistente
                 QMessageBox.information(self, "Sesión Cerrada", "Sesión cerrada correctamente")
                 logger.info("Sesión de inventario cerrada")
         else:
             QMessageBox.information(self, "Sin Sesión", "No hay ninguna sesión activa")
-
-    # =========================================================================
-    # ✅ NUEVO: Slot del monitor de stock
-    # =========================================================================
-
-    def _on_alertas_stock(self, productos: list) -> None:
-        """
-        Recibe la lista de productos con stock bajo desde StockMonitorService.
-        Filtra los ignorados durante el día, actualiza el panel y muestra el popup.
-        """
-        # Filtrar productos ya ignorados hoy
-        productos = productos_ignorados_hoy(productos)
-        if not productos:
-            return
-
-        logger.info(
-            f"Monitor: {len(productos)} alerta(s) de stock → panel y popup"
-        )
-
-        # 1. Actualizar el panel lateral siempre
-        self.inventario_view.actualizar_panel_alertas(productos)
-
-        # 2. Mostrar popup solo si hay sesión activa
-        if not self.authenticated_user:
-            return
-
-        dialog = AlertaAutorizacionDialog(
-            productos=productos,
-            authenticated_user=self.authenticated_user,
-            parent=self,
-        )
-        result = dialog.exec_()
-        if result == AlertaAutorizacionDialog.Accepted:
-            pedido = dialog.get_pedido_creado()
-            if pedido:
-                QMessageBox.information(
-                    self,
-                    "Pedido de Reabastecimiento Creado",
-                    f"Se generó el pedido de reabastecimiento #{pedido.id}.\n"
-                    f"Productos incluidos: {len(productos)}\n\n"
-                    f"El pedido fue enviado al proveedor y queda registrado\n"
-                    f"en la pestaña Pedidos para su seguimiento."
-                )
-                logger.info(
-                    f"Pedido #{pedido.id} creado por {self.authenticated_user}"
-                )
-        elif result == AlertaAutorizacionDialog.IGNORAR_DIA_CODE:
-            logger.info("Alertas ignoradas por el resto del día")
-        else:
-            logger.info("Usuario pospuso la alerta (recordar más tarde)")
-
-    def abrir_proveedores(self):
-        """Abre el diálogo de gestión de proveedores"""
-        dialog = ProveedoresDialog(parent=self)
-        dialog.exec_()
 
     def mostrar_acerca_de(self):
         """Muestra el diálogo Acerca de"""

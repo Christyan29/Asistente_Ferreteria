@@ -660,6 +660,106 @@ class AsistenteView(QWidget):
 
         return respuesta_limpia if respuesta_limpia else respuesta
 
+    def extraer_entidad_producto(self, texto: str) -> Optional[str]:
+        """
+        Extrae entidad de producto del texto del usuario.
+
+        Estrategia:
+        1. Normaliza texto (minúsculas, sin acentos, sin puntuación)
+        2. Obtiene lista blanca dinámica de productos en BD
+        3. Busca coincidencia exacta o fuzzy (threshold 85%)
+        4. Maneja plurales comunes
+
+        Args:
+            texto: Pregunta del usuario
+
+        Returns:
+            Entidad limpia (ej: "martillo") o None si no se identifica
+
+        Ejemplos:
+            "cuantos martillos tienes?" → "martillo"
+            "CLAVOS!!!" → "clavo"
+            "necesito palas para jardín" → "pala"
+            "enumera materiales" → None (no es producto específico)
+        """
+        import re
+
+        # 1. Normalización agresiva
+        texto_limpio = unidecode(texto.lower())
+        texto_limpio = re.sub(r'[^\w\s]', '', texto_limpio)  # Quitar puntuación
+        texto_limpio = texto_limpio.strip()
+
+        # 2. Obtener lista blanca dinámica de productos
+        try:
+            productos_bd = self.producto_repo.get_all_product_names()
+            productos_bd_lower = [unidecode(p.lower()) for p in productos_bd]
+        except Exception as e:
+            logger.error(f"Error al obtener lista de productos: {e}")
+            return None
+
+        # 3. Diccionario de plurales conocidos (extendido)
+        plurales = {
+            'martillos': 'martillo', 'clavos': 'clavo', 'tornillos': 'tornillo',
+            'taladros': 'taladro', 'serruchos': 'serrucho', 'palas': 'pala',
+            'picos': 'pico', 'llaves': 'llave', 'destornilladores': 'destornillador',
+            'alicates': 'alicate', 'pinzas': 'pinza', 'cables': 'cable',
+            'tubos': 'tubo', 'codos': 'codo', 'grifos': 'grifo',
+            'baldosas': 'baldosa', 'ladrillos': 'ladrillo', 'bloques': 'bloque',
+            'pinturas': 'pintura', 'brochas': 'brocha', 'rodillos': 'rodillo',
+            'lijas': 'lija', 'adhesivos': 'adhesivo', 'siliconas': 'silicona'
+        }
+
+        # 4. Buscar coincidencia exacta en cada palabra del texto
+        palabras = texto_limpio.split()
+        for palabra in palabras:
+            # Intentar con palabra original
+            if palabra in productos_bd_lower:
+                idx = productos_bd_lower.index(palabra)
+                logger.info(f"✅ Entidad exacta encontrada: '{palabra}' → '{productos_bd[idx]}'")
+                return productos_bd[idx].lower()
+
+            # Intentar con singular si está en diccionario
+            if palabra in plurales:
+                singular = plurales[palabra]
+                if singular in productos_bd_lower:
+                    idx = productos_bd_lower.index(singular)
+                    logger.info(f"✅ Plural normalizado: '{palabra}' → '{productos_bd[idx]}'")
+                    return productos_bd[idx].lower()
+
+            # Regla simple: quitar 's' final si tiene más de 3 letras
+            if palabra.endswith('s') and len(palabra) > 3:
+                singular_simple = palabra[:-1]
+                if singular_simple in productos_bd_lower:
+                    idx = productos_bd_lower.index(singular_simple)
+                    logger.info(f"✅ Plural detectado: '{palabra}' → '{productos_bd[idx]}'")
+                    return productos_bd[idx].lower()
+
+        # 5. Fuzzy matching como fallback
+        try:
+            from rapidfuzz import fuzz, process
+
+            # Buscar mejor match en toda la frase
+            mejor_match = process.extractOne(
+                texto_limpio,
+                productos_bd_lower,
+                scorer=fuzz.partial_ratio
+            )
+
+            if mejor_match and mejor_match[1] >= 85:  # Threshold 85%
+                idx = productos_bd_lower.index(mejor_match[0])
+                logger.info(f"✅ Fuzzy match: '{texto_limpio}' → '{productos_bd[idx]}' (confianza: {mejor_match[1]}%)")
+                return productos_bd[idx].lower()
+            else:
+                logger.info(f"❌ No se encontró entidad clara en: '{texto_limpio}'")
+                return None
+
+        except ImportError:
+            logger.warning("rapidfuzz no disponible, saltando fuzzy matching")
+            return None
+        except Exception as e:
+            logger.error(f"Error en fuzzy matching: {e}")
+            return None
+
     def detectar_intencion(self, mensaje: str) -> str:
         """
         Detecta la intención del usuario para decidir cómo procesar.
@@ -989,9 +1089,43 @@ class AsistenteView(QWidget):
 
             # CASO B: INFO DE STOCK/PRECIO
             elif intencion == 'product_info':
-                # Usar modo básico (consulta DB directamente)
-                respuesta = self.procesar_modo_basico(mensaje)
-                self.last_response_source = "database"  # ✅ NUEVO
+                # ✅ CRÍTICO: Extraer entidad ANTES de buscar en BD
+                entidad = self.extraer_entidad_producto(mensaje)
+
+                if entidad:
+                    # Buscar en BD con término limpio
+                    productos = self.producto_repo.search(entidad, solo_activos=True)
+
+                    if productos:
+                        # Construir contexto estructurado
+                        p = productos[0]  # Tomar primer resultado
+                        inventory_context = (
+                            f"Producto encontrado: {p.nombre} "
+                            f"(Stock: {p.stock} {p.unidad_medida}, Precio: ${p.precio})"
+                        )
+                        logger.info(f"📦 Contexto: {inventory_context}")
+
+                        # Pasar a Groq con contexto real
+                        respuesta = self.groq_service.chat_with_context(
+                            mensaje,
+                            inventory_context=inventory_context
+                        )
+                        self.last_response_source = "groq+database"
+                    else:
+                        # Entidad válida pero no en stock
+                        respuesta = f"No tenemos {entidad} en stock actualmente. Consulta en tienda para disponibilidad."
+                        self.last_response_source = "database"
+                else:
+                    # No se pudo extraer entidad clara
+                    # Casos: "enumera materiales", "qué productos tienes"
+                    if any(palabra in mensaje.lower() for palabra in ['enumera', 'lista', 'materiales', 'productos', 'categorias', 'categorías']):
+                        respuesta = (
+                            "Tenemos estas categorías: herramientas manuales, ferretería básica, "
+                            "electricidad, fontanería. ¿Necesitas detalles de alguna?"
+                        )
+                    else:
+                        respuesta = "No entendí qué producto necesitas. ¿Puedes especificar?"
+                    self.last_response_source = "groq"
 
             # CASO C: INSTRUCCIONES
             elif intencion == 'instruction':

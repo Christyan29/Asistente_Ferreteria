@@ -6,7 +6,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QLineEdit, QLabel, QComboBox, QMessageBox,
     QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QTextEdit, QGroupBox,
-    QFileDialog, QProgressDialog, QMenu, QAction, QHeaderView
+    QFileDialog, QProgressDialog, QMenu, QAction, QHeaderView,
+    QFrame, QScrollArea   # ✅ NUEVO: panel colapsable
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
@@ -17,6 +18,7 @@ from app.infrastructure.product_repository import ProductRepository, CategoriaRe
 from app.domain.producto import Producto
 from app.domain.categoria import Categoria
 from app.services.excel_importer import ExcelImporter
+from app.infrastructure.proveedor_repository import ProveedorRepository  # ✅ NUEVO
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +45,35 @@ class InventarioView(QWidget):
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Título
+        # Título + botón alertas en misma fila
+        title_row = QHBoxLayout()
         title = QLabel("Gestión de Inventario")
         title.setObjectName("titleLabel")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+
+        # ✅ NUEVO: botón para desplegar/colapsar panel de alertas
+        self._btn_alertas = QPushButton("⚠ Alertas (0)")
+        self._btn_alertas.setCheckable(True)
+        self._btn_alertas.setChecked(False)
+        self._btn_alertas.setFixedWidth(130)
+        self._btn_alertas.setStyleSheet("""
+            QPushButton {
+                background-color: #2d3748;
+                color: #a0aec0;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 9pt;
+                font-weight: 600;
+            }
+            QPushButton:checked {
+                background-color: #c53030;
+                color: white;
+            }
+        """)
+        self._btn_alertas.clicked.connect(self.toggle_panel_alertas)
+        title_row.addWidget(self._btn_alertas)
+        layout.addLayout(title_row)
 
         # Barra de búsqueda y filtros
         search_layout = self.create_search_bar()
@@ -56,9 +83,20 @@ class InventarioView(QWidget):
         buttons_layout = self.create_action_buttons()
         layout.addLayout(buttons_layout)
 
+        # Contenedor horizontal: tabla + panel alertas
+        self._content_row = QHBoxLayout()
+        self._content_row.setSpacing(10)
+
         # Tabla de productos
         self.table = self.create_products_table()
-        layout.addWidget(self.table)
+        self._content_row.addWidget(self.table, stretch=3)
+
+        # ✅ NUEVO: Panel lateral de alertas (oculto por defecto)
+        self._panel_alertas = self._crear_panel_alertas()
+        self._panel_alertas.setVisible(False)
+        self._content_row.addWidget(self._panel_alertas, stretch=1)
+
+        layout.addLayout(self._content_row)
 
         # Barra de estado
         self.status_label = QLabel("Listo")
@@ -550,7 +588,16 @@ class InventarioView(QWidget):
         if dialog.exec_() == QDialog.Accepted:
             try:
                 producto = dialog.get_producto()
-                self.producto_repo.create(producto)
+                producto_creado = self.producto_repo.create(producto)
+                # ✅ NUEVO: guardar relación con proveedor si se seleccionó uno
+                proveedor_id = dialog.get_proveedor_id_seleccionado()
+                if proveedor_id and producto_creado.id:
+                    try:
+                        from app.infrastructure.proveedor_repository import ProveedorRepository
+                        prov_repo = ProveedorRepository()
+                        prov_repo.asignar_proveedor_a_producto(producto_creado.id, proveedor_id)
+                    except Exception as pe:
+                        logger.warning(f"No se pudo asignar proveedor al producto: {pe}")
                 self.cargar_datos()
                 QMessageBox.information(self, "Éxito", "Producto agregado correctamente")
             except Exception as e:
@@ -569,6 +616,17 @@ class InventarioView(QWidget):
                 producto_actualizado = dialog.get_producto()
                 producto_actualizado.id = producto.id
                 self.producto_repo.update(producto_actualizado)
+                # ✅ NUEVO: actualizar relación con proveedor
+                proveedor_id = dialog.get_proveedor_id_seleccionado()
+                try:
+                    from app.infrastructure.proveedor_repository import ProveedorRepository
+                    prov_repo = ProveedorRepository()
+                    if proveedor_id:
+                        prov_repo.asignar_proveedor_a_producto(producto.id, proveedor_id)
+                    else:
+                        prov_repo.remover_proveedor_de_producto(producto.id)
+                except Exception as pe:
+                    logger.warning(f"No se pudo actualizar proveedor del producto: {pe}")
                 self.cargar_datos()
                 QMessageBox.information(self, "Éxito", "Producto actualizado correctamente")
             except Exception as e:
@@ -634,9 +692,247 @@ class InventarioView(QWidget):
         except Exception as e:
             logger.error(f"Error en importación: {e}")
             QMessageBox.critical(self, "Error", f"Error al importar archivo:\n{str(e)}")
+    # =========================================================================
+    # ✅ Panel lateral colapsable de Notificaciones de stock
+    # =========================================================================
+
+    def _crear_panel_alertas(self) -> QFrame:
+        """Construye el widget del panel lateral (oculto por defecto)."""
+        panel = QFrame()
+        panel.setObjectName("panelAlertas")
+        panel.setMinimumWidth(240)
+        panel.setMaximumWidth(270)
+        panel.setStyleSheet("""
+            QFrame#panelAlertas {
+                background-color: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+            }
+        """)
+
+        v = QVBoxLayout(panel)
+        v.setSpacing(8)
+        v.setContentsMargins(10, 10, 10, 10)
+
+        # Encabezado: título + botón Limpiar
+        header_row = QHBoxLayout()
+        header_lbl = QLabel("Notificaciones")
+        header_lbl.setStyleSheet(
+            "color: #c53030; font-size: 10pt; font-weight: 700;"
+        )
+        header_row.addWidget(header_lbl)
+        header_row.addStretch()
+
+        self._btn_limpiar = QPushButton("Limpiar")
+        self._btn_limpiar.setFixedHeight(22)
+        self._btn_limpiar.setStyleSheet("""
+            QPushButton {
+                color: #a0aec0;
+                background: transparent;
+                border: 1px solid #e2e8f0;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 8pt;
+            }
+            QPushButton:hover {
+                background-color: #f7fafc;
+                color: #4a5568;
+                border-color: #cbd5e0;
+            }
+        """)
+        self._btn_limpiar.clicked.connect(self._limpiar_panel)
+        header_row.addWidget(self._btn_limpiar)
+        v.addLayout(header_row)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background-color: #e2e8f0; max-height: 1px;")
+        v.addWidget(sep)
+
+        # Área scrollable
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical {
+                background: #f7fafc; width: 6px; border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #cbd5e0; border-radius: 3px;
+            }
+        """)
+
+        self._alertas_container = QWidget()
+        self._alertas_container.setStyleSheet("background: transparent;")
+        self._alertas_layout = QVBoxLayout(self._alertas_container)
+        self._alertas_layout.setSpacing(8)     # ✅ más espacio entre tarjetas
+        self._alertas_layout.setContentsMargins(2, 4, 2, 4)
+        self._alertas_layout.addStretch()
+
+        scroll.setWidget(self._alertas_container)
+        v.addWidget(scroll)
+
+        hint = QLabel("Clic en un producto para actuar")
+        hint.setStyleSheet(
+            "color: #a0aec0; font-size: 8pt; padding-top: 4px;"
+        )
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        self._productos_alerta_actual = []
+        return panel
+
+    def actualizar_panel_alertas(self, productos: list) -> None:
+        """
+        Refresca el contenido del panel con los productos con stock bajo.
+        Cada tarjeta es clickeable y abre el diálogo de autorización.
+        """
+        # Guardar lista actual para uso en clics
+        self._productos_alerta_actual = list(productos)
+
+        # Limpiar items existentes (excepto stretch final)
+        while self._alertas_layout.count() > 1:
+            item = self._alertas_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not productos:
+            empty = QLabel("Sin notificaciones")
+            empty.setStyleSheet("color: #a0aec0; font-size: 9pt;")
+            empty.setAlignment(Qt.AlignCenter)
+            self._alertas_layout.insertWidget(0, empty)
+            self._btn_alertas.setText("Notificaciones (0)")
+            self._btn_alertas.setChecked(False)
+            self._panel_alertas.setVisible(False)
+            return
+
+        n = len(productos)
+        self._btn_alertas.setText(f"Notificaciones ({n})")
+
+        for i, producto in enumerate(productos):
+            faltante = max(0, producto.stock_minimo - producto.stock)
+
+            # Tarjeta como QPushButton clickeable
+            card = QPushButton()
+            card.setCursor(Qt.PointingHandCursor)
+            card.setFixedHeight(60)   # ✅ altura fija para que no se amontonen
+            card.setStyleSheet("""
+                QPushButton {
+                    background-color: #fff5f0;
+                    border: 1px solid #fed7d7;
+                    border-left: 3px solid #c53030;
+                    border-radius: 5px;
+                    padding: 8px 10px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #fee2e2;
+                    border-color: #c53030;
+                }
+            """)
+
+            card_layout = QVBoxLayout(card)
+            card_layout.setSpacing(2)
+            card_layout.setContentsMargins(4, 4, 4, 4)
+
+            name_lbl = QLabel(producto.nombre)
+            name_lbl.setStyleSheet(
+                "color: #2d3748; font-size: 9pt; font-weight: 600;"
+                "background: transparent; border: none;"
+            )
+            name_lbl.setWordWrap(True)
+            card_layout.addWidget(name_lbl)
+
+            stock_lbl = QLabel(
+                f"Stock: {producto.stock} \u2022 Mín: {producto.stock_minimo} "
+                f"(faltan {faltante})"
+            )
+            stock_lbl.setStyleSheet(
+                "color: #c53030; font-size: 8pt; background: transparent; border: none;"
+            )
+            card_layout.addWidget(stock_lbl)
+
+            # Conectar clic — abre el diálogo con TODOS los productos actuales
+            card.clicked.connect(self._abrir_autorizacion_desde_panel)
+
+            self._alertas_layout.insertWidget(i, card)
+
+        logger.debug(f"Panel notificaciones actualizado: {n} producto(s)")
+
+    def _abrir_autorizacion_desde_panel(self) -> None:
+        """Abre el diálogo de autorización de pedido desde una tarjeta del panel."""
+        if not self._productos_alerta_actual:
+            return
+        try:
+            from app.presentation.components.alerta_autorizacion_dialog import (
+                AlertaAutorizacionDialog
+            )
+            # Obtener usuario autenticado desde la ventana principal
+            authenticated_user = None
+            parent = self.parent()
+            if parent and hasattr(parent, 'authenticated_user'):
+                authenticated_user = parent.authenticated_user
+
+            dialog = AlertaAutorizacionDialog(
+                productos=self._productos_alerta_actual,
+                authenticated_user=authenticated_user,
+                parent=self,
+            )
+            if dialog.exec_() == AlertaAutorizacionDialog.Accepted:
+                pedido = dialog.get_pedido_creado()
+                if pedido:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        self,
+                        "Pedido Creado",
+                        f"Pedido de reabastecimiento registrado.\n"
+                        f"ID: #{pedido.id}  |  Productos: {len(self._productos_alerta_actual)}\n"
+                        f"Puede ver los detalles en la pestaña Pedidos."
+                    )
+        except Exception as e:
+            logger.error(f"Error al abrir diálogo de autorización desde panel: {e}")
+
+    def _limpiar_panel(self) -> None:
+        """
+        Elimina todas las tarjetas del panel, vacía la lista interna,
+        resetea el badge a (0) y oculta el panel.
+        El monitor de stock las volverá a añadir en el siguiente ciclo
+        si el stock sigue estando bajo.
+        """
+        # 1. Eliminar todas las tarjetas del layout (excepto el stretch final)
+        while self._alertas_layout.count() > 1:
+            item = self._alertas_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # 2. Vaciar lista interna
+        self._productos_alerta_actual = []
+
+        # 3. Mostrar mensaje vacío
+        empty = QLabel("Sin notificaciones")
+        empty.setStyleSheet("color: #a0aec0; font-size: 9pt;")
+        empty.setAlignment(Qt.AlignCenter)
+        self._alertas_layout.insertWidget(0, empty)
+
+        # 4. Resetear badge
+        self._btn_alertas.setText("Notificaciones (0)")
+        self._btn_alertas.setChecked(False)
+
+        # 5. Ocultar panel
+        self._panel_alertas.setVisible(False)
+        logger.debug("Panel notificaciones limpiado completamente por el usuario")
+
+    def toggle_panel_alertas(self) -> None:
+        """Muestra u oculta el panel lateral de notificaciones."""
+        visible = self._btn_alertas.isChecked()
+        self._panel_alertas.setVisible(visible)
+        logger.debug(f"Panel notificaciones {'visible' if visible else 'oculto'}")
 
 
 class ProductoDialog(QDialog):
+
     """Diálogo para agregar/editar productos"""
 
     def __init__(self, categorias, producto=None, parent=None):
@@ -644,6 +940,8 @@ class ProductoDialog(QDialog):
         self.categorias = categorias
         self.producto = producto
         self.is_edit = producto is not None
+        self.proveedor_repo = ProveedorRepository()   # ✅ NUEVO
+        self.proveedores = self.proveedor_repo.get_all()  # ✅ NUEVO: carga proveedores activos
         self.setup_ui()
 
         if self.is_edit:
@@ -722,6 +1020,17 @@ class ProductoDialog(QDialog):
         self.marca_input.setPlaceholderText("Marca del producto")
         form_layout.addRow("Marca:", self.marca_input)
 
+        # ✅ NUEVO: Proveedor
+        self.proveedor_combo = QComboBox()
+        self.proveedor_combo.addItem("-- Sin proveedor --", None)
+        for prov in self.proveedores:
+            self.proveedor_combo.addItem(prov.nombre, prov.id)
+        self.proveedor_combo.setToolTip(
+            "Proveedor principal de este producto.\n"
+            "Aparecerá al generar pedidos automáticos."
+        )
+        form_layout.addRow("Proveedor:", self.proveedor_combo)
+
         # Ubicación
         self.ubicacion_input = QLineEdit()
         self.ubicacion_input.setPlaceholderText("Ej: Pasillo 3, Estante A")
@@ -762,6 +1071,16 @@ class ProductoDialog(QDialog):
             if index >= 0:
                 self.categoria_combo.setCurrentIndex(index)
 
+        # ✅ NUEVO: Cargar proveedor principal asignado al producto
+        try:
+            proveedor = self.proveedor_repo.get_proveedor_de_producto(self.producto.id)
+            if proveedor:
+                idx = self.proveedor_combo.findData(proveedor.id)
+                if idx >= 0:
+                    self.proveedor_combo.setCurrentIndex(idx)
+        except Exception:
+            pass  # Si falla, deja el combo en '-- Sin proveedor --'
+
     def get_producto(self):
         """Obtiene el producto con los datos del formulario"""
         return Producto(
@@ -776,3 +1095,7 @@ class ProductoDialog(QDialog):
             marca=self.marca_input.text().strip() or None,
             ubicacion=self.ubicacion_input.text().strip() or None,
         )
+
+    def get_proveedor_id_seleccionado(self) -> int | None:
+        """✅ NUEVO: Retorna el ID del proveedor seleccionado (None si no hay)"""
+        return self.proveedor_combo.currentData()
