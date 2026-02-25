@@ -1,11 +1,28 @@
+# Interfaz gráfica
 PyQt5==5.15.11
-groq==0.4.1
+
+# IA / LLM
+groq==0.36.0
+google-generativeai==0.8.5
+
+# Voz
 SpeechRecognition==3.10.4
 pyttsx3==2.99
-setuptools
-pandas==2.2.3
+pywin32==311                  # pythoncom (TTS en Windows)
+
+# Datos / Excel
+pandas==2.3.2
 openpyxl==3.1.5
+
+# Configuración y entorno
 python-dotenv==1.0.1
+setuptools
+
+# Base de datos
 SQLAlchemy==2.0.36
+
+# Generación de PDF
 reportlab==4.0.7
+
+# Utilidades de texto
 unidecode==1.3.6
